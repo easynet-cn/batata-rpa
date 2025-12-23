@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { Handle, Position } from '@vue-flow/core';
-import { Switch } from '@element-plus/icons-vue';
+import { GitBranch } from 'lucide-vue-next';
 import { useExecutionStore } from '@/stores';
 
 const props = defineProps<{
@@ -18,7 +18,7 @@ const isExecuting = computed(() => executionStore.state?.currentNodeId === props
   <div class="condition-node" :class="{ executing: isExecuting }">
     <Handle type="target" :position="Position.Top" />
     <div class="node-header">
-      <el-icon :size="14" color="#fff"><Switch /></el-icon>
+      <GitBranch :size="14" class="text-white" />
       <span>条件分支</span>
     </div>
     <div class="node-body">
@@ -42,7 +42,7 @@ const isExecuting = computed(() => executionStore.state?.currentNodeId === props
 .condition-node {
   min-width: 160px;
   background: #fff;
-  border: 2px solid #e6a23c;
+  border: 2px solid #f59e0b;
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -53,7 +53,7 @@ const isExecuting = computed(() => executionStore.state?.currentNodeId === props
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  background: #e6a23c;
+  background: #f59e0b;
   color: #fff;
   font-size: 12px;
   font-weight: 500;
@@ -68,14 +68,14 @@ const isExecuting = computed(() => executionStore.state?.currentNodeId === props
 
 .node-label {
   font-size: 13px;
-  color: var(--el-text-color-primary);
+  color: #1f2937;
 }
 
 .node-expression {
   font-size: 11px;
-  color: var(--el-text-color-secondary);
+  color: #6b7280;
   font-family: monospace;
-  background: var(--el-fill-color-light);
+  background: #f3f4f6;
   padding: 2px 6px;
   border-radius: 4px;
 }
@@ -84,9 +84,9 @@ const isExecuting = computed(() => executionStore.state?.currentNodeId === props
   display: flex;
   justify-content: space-around;
   padding: 6px 10px;
-  border-top: 1px solid var(--el-border-color-lighter);
+  border-top: 1px solid #e5e7eb;
   font-size: 11px;
-  color: var(--el-text-color-secondary);
+  color: #6b7280;
 }
 
 .output-true, .output-false {
@@ -95,24 +95,24 @@ const isExecuting = computed(() => executionStore.state?.currentNodeId === props
 }
 
 .output-true span {
-  color: #67c23a;
+  color: #22c55e;
 }
 
 .output-false span {
-  color: #f56c6c;
+  color: #ef4444;
 }
 
 .condition-node.executing {
-  box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.5), 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5), 0 2px 8px rgba(0, 0, 0, 0.15);
   animation: pulse 1.5s infinite;
 }
 
 @keyframes pulse {
   0%, 100% {
-    box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.5), 0 2px 8px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5), 0 2px 8px rgba(0, 0, 0, 0.15);
   }
   50% {
-    box-shadow: 0 0 0 6px rgba(64, 158, 255, 0.3), 0 2px 8px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.3), 0 2px 8px rgba(0, 0, 0, 0.15);
   }
 }
 </style>

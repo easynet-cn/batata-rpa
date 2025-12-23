@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import { NODE_CONFIGS, type NodeType } from '@/types';
 import { useWorkflowStore } from '@/stores';
-import * as Icons from '@element-plus/icons-vue';
+import { ChevronDown, ChevronRight } from 'lucide-vue-next';
+import * as LucideIcons from 'lucide-vue-next';
 
 const workflowStore = useWorkflowStore();
 
@@ -10,6 +12,12 @@ const categories = [
   { key: 'action', label: '操作指令' },
   { key: 'data', label: '数据处理' },
 ];
+
+const expandedCategories = ref<Record<string, boolean>>({
+  control: true,
+  action: true,
+  data: true,
+});
 
 const nodesByCategory = categories.map((cat) => ({
   ...cat,
@@ -23,14 +31,12 @@ function onDragStart(event: DragEvent, type: NodeType) {
   }
 }
 
-// 点击添加节点到画布
 function onNodeClick(type: NodeType) {
   const config = NODE_CONFIGS[type];
   if (!config || !workflowStore.currentWorkflow) {
     return;
   }
 
-  // 计算新节点位置：基于现有节点数量错开位置
   const existingNodes = workflowStore.currentNodes;
   const offsetX = (existingNodes.length % 5) * 50;
   const offsetY = Math.floor(existingNodes.length / 5) * 80;
@@ -47,93 +53,46 @@ function onNodeClick(type: NodeType) {
 }
 
 function getIcon(iconName: string) {
-  return (Icons as Record<string, unknown>)[iconName] || Icons.Document;
+  return (LucideIcons as Record<string, unknown>)[iconName] || LucideIcons.FileText;
+}
+
+function toggleCategory(key: string) {
+  expandedCategories.value[key] = !expandedCategories.value[key];
 }
 </script>
 
 <template>
   <div class="node-palette">
-    <div class="palette-header">
-      <span>节点面板</span>
-    </div>
+    <div class="palette-header">节点面板</div>
 
-    <el-collapse :model-value="['control', 'action', 'data']">
-      <el-collapse-item
-        v-for="category in nodesByCategory"
-        :key="category.key"
-        :title="category.label"
-        :name="category.key"
-      >
-        <div class="node-list">
+    <div class="flex-1 overflow-y-auto">
+      <div v-for="category in nodesByCategory" :key="category.key" class="node-category">
+        <div class="node-category-header" @click="toggleCategory(category.key)">
+          <span>{{ category.label }}</span>
+          <component
+            :is="expandedCategories[category.key] ? ChevronDown : ChevronRight"
+            :size="16"
+            class="text-gray-400"
+          />
+        </div>
+
+        <div v-show="expandedCategories[category.key]" class="node-list">
           <div
             v-for="node in category.nodes"
             :key="node.type"
             class="node-item"
             draggable="true"
+            title="点击添加到画布，或拖拽到指定位置"
             @dragstart="onDragStart($event, node.type)"
             @click="onNodeClick(node.type)"
-            title="点击添加到画布，或拖拽到指定位置"
           >
             <div class="node-icon" :style="{ backgroundColor: node.color }">
-              <el-icon :size="16" color="#fff">
-                <component :is="getIcon(node.icon)" />
-              </el-icon>
+              <component :is="getIcon(node.icon)" :size="16" />
             </div>
             <span class="node-label">{{ node.label }}</span>
           </div>
         </div>
-      </el-collapse-item>
-    </el-collapse>
+      </div>
+    </div>
   </div>
 </template>
-
-<style scoped>
-.node-palette {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-.palette-header {
-  padding: 12px 16px;
-  font-weight: 500;
-  border-bottom: 1px solid var(--el-border-color-light);
-}
-
-.node-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.node-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 4px;
-  cursor: grab;
-  transition: background-color 0.2s;
-}
-
-.node-item:hover {
-  background-color: var(--el-fill-color-light);
-}
-
-.node-item:active {
-  cursor: grabbing;
-}
-
-.node-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.node-label {
-  font-size: 13px;
-}
-</style>

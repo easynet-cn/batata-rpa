@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useElementStore, type ElementLibraryInfo } from '@/stores/element';
-import { ElMessage, ElMessageBox } from 'element-plus';
-import { Aim, Delete, View, FolderOpened, Plus } from '@element-plus/icons-vue';
+import { Crosshair, Trash2, Eye, FolderOpen, Plus, X, FileText } from 'lucide-vue-next';
 import ElementPicker from '@/components/element/ElementPicker.vue';
 import type { UIElement } from '@/types';
 
@@ -10,7 +9,34 @@ const elementStore = useElementStore();
 const showCreateDialog = ref(false);
 const showPickerDialog = ref(false);
 const showElementDetail = ref(false);
+const showConfirmDialog = ref(false);
+const confirmDialogData = ref<{ title: string; message: string; onConfirm: () => void } | null>(null);
 const newLibraryName = ref('');
+
+// Toast system
+const toasts = ref<{ id: number; message: string; type: 'success' | 'error' | 'warning' }[]>([]);
+let toastId = 0;
+
+function showToast(message: string, type: 'success' | 'error' | 'warning' = 'success') {
+  const id = ++toastId;
+  toasts.value.push({ id, message, type });
+  setTimeout(() => {
+    toasts.value = toasts.value.filter(t => t.id !== id);
+  }, 3000);
+}
+
+function showConfirm(title: string, message: string, onConfirm: () => void) {
+  confirmDialogData.value = { title, message, onConfirm };
+  showConfirmDialog.value = true;
+}
+
+function handleConfirm() {
+  if (confirmDialogData.value) {
+    confirmDialogData.value.onConfirm();
+  }
+  showConfirmDialog.value = false;
+  confirmDialogData.value = null;
+}
 
 onMounted(async () => {
   await elementStore.fetchLibraries();
@@ -23,7 +49,7 @@ async function createLibrary() {
     await elementStore.fetchLibraries();
     newLibraryName.value = '';
     showCreateDialog.value = false;
-    ElMessage.success('元素库创建成功');
+    showToast('元素库创建成功', 'success');
   }
 }
 
@@ -32,22 +58,19 @@ async function openLibrary(info: ElementLibraryInfo) {
 }
 
 async function deleteLibraryConfirm(info: ElementLibraryInfo) {
-  try {
-    await ElMessageBox.confirm(
-      `确定要删除元素库 "${info.name}" 吗？此操作不可恢复。`,
-      '确认删除',
-      { type: 'warning' }
-    );
-    await elementStore.deleteLibrary(info.id);
-    ElMessage.success('元素库已删除');
-  } catch {
-    // Cancelled
-  }
+  showConfirm(
+    '确认删除',
+    `确定要删除元素库 "${info.name}" 吗？此操作不可恢复。`,
+    async () => {
+      await elementStore.deleteLibrary(info.id);
+      showToast('元素库已删除', 'success');
+    }
+  );
 }
 
 function startCapture() {
   if (!elementStore.currentLibrary) {
-    ElMessage.warning('请先选择或创建一个元素库');
+    showToast('请先选择或创建一个元素库', 'warning');
     return;
   }
   showPickerDialog.value = true;
@@ -56,7 +79,7 @@ function startCapture() {
 async function handleElementCaptured(element: UIElement) {
   elementStore.addElement(element);
   await elementStore.saveLibrary();
-  ElMessage.success('元素已添加到库');
+  showToast('元素已添加到库', 'success');
 }
 
 function viewElement(element: UIElement) {
@@ -65,18 +88,15 @@ function viewElement(element: UIElement) {
 }
 
 async function removeElement(id: string) {
-  try {
-    await ElMessageBox.confirm(
-      '确定要删除此元素吗？',
-      '确认删除',
-      { type: 'warning' }
-    );
-    elementStore.removeElement(id);
-    await elementStore.saveLibrary();
-    ElMessage.success('元素已删除');
-  } catch {
-    // Cancelled
-  }
+  showConfirm(
+    '确认删除',
+    '确定要删除此元素吗？',
+    async () => {
+      elementStore.removeElement(id);
+      await elementStore.saveLibrary();
+      showToast('元素已删除', 'success');
+    }
+  );
 }
 
 async function highlightElement(element: UIElement) {
@@ -86,16 +106,29 @@ async function highlightElement(element: UIElement) {
 
 <template>
   <div class="element-library">
+    <!-- Toast notifications -->
+    <div class="toast-container">
+      <div
+        v-for="toast in toasts"
+        :key="toast.id"
+        class="toast"
+        :class="[`toast-${toast.type}`]"
+      >
+        {{ toast.message }}
+      </div>
+    </div>
+
     <!-- Left sidebar: Library list -->
     <div class="library-sidebar">
       <div class="sidebar-header">
         <h3>元素库列表</h3>
-        <el-button type="primary" size="small" :icon="Plus" @click="showCreateDialog = true">
+        <button class="btn btn-primary btn-small" @click="showCreateDialog = true">
+          <Plus :size="14" />
           新建
-        </el-button>
+        </button>
       </div>
 
-      <el-scrollbar class="library-list">
+      <div class="library-list">
         <div
           v-for="lib in elementStore.libraryList"
           :key="lib.id"
@@ -104,24 +137,25 @@ async function highlightElement(element: UIElement) {
           @click="openLibrary(lib)"
         >
           <div class="library-item-content">
-            <el-icon><FolderOpened /></el-icon>
+            <FolderOpen :size="20" class="library-icon" />
             <div class="library-item-info">
               <span class="library-name">{{ lib.name }}</span>
               <span class="library-count">{{ lib.element_count }} 个元素</span>
             </div>
           </div>
-          <el-button
+          <button
             class="library-delete-btn"
-            text
-            type="danger"
-            size="small"
-            :icon="Delete"
             @click.stop="deleteLibraryConfirm(lib)"
-          />
+          >
+            <Trash2 :size="14" />
+          </button>
         </div>
 
-        <el-empty v-if="elementStore.libraryList.length === 0" description="暂无元素库" />
-      </el-scrollbar>
+        <div v-if="elementStore.libraryList.length === 0" class="empty-state">
+          <FileText :size="40" class="empty-icon" />
+          <span>暂无元素库</span>
+        </div>
+      </div>
     </div>
 
     <!-- Main content: Element list -->
@@ -134,95 +168,128 @@ async function highlightElement(element: UIElement) {
           <h3 v-else>选择一个元素库</h3>
         </div>
         <div class="header-right">
-          <el-button
-            type="primary"
-            :icon="Aim"
+          <button
+            class="btn btn-primary"
             @click="startCapture"
             :disabled="!elementStore.currentLibrary"
           >
+            <Crosshair :size="14" />
             捕获元素
-          </el-button>
+          </button>
         </div>
       </div>
 
       <div class="main-content">
-        <el-empty
+        <div
           v-if="!elementStore.currentLibrary"
-          description="请从左侧选择一个元素库，或创建新的元素库"
+          class="empty-state-large"
         >
-          <el-button type="primary" @click="showCreateDialog = true">创建元素库</el-button>
-        </el-empty>
+          <FileText :size="64" class="empty-icon" />
+          <p>请从左侧选择一个元素库，或创建新的元素库</p>
+          <button class="btn btn-primary" @click="showCreateDialog = true">创建元素库</button>
+        </div>
 
-        <el-empty
+        <div
           v-else-if="elementStore.currentLibrary.elements.length === 0"
-          description="此元素库暂无元素，点击上方按钮开始捕获"
-        />
-
-        <el-table
-          v-else
-          :data="elementStore.currentLibrary.elements"
-          style="width: 100%"
-          stripe
+          class="empty-state-large"
         >
-          <el-table-column prop="name" label="元素名称" min-width="150">
-            <template #default="{ row }">
-              <div class="element-name-cell">
-                <span>{{ row.name }}</span>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column prop="controlType" label="控件类型" width="120">
-            <template #default="{ row }">
-              <el-tag size="small" type="info">{{ row.controlType }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="processName" label="进程" width="120" />
-          <el-table-column prop="windowTitle" label="窗口标题" min-width="150" show-overflow-tooltip />
-          <el-table-column label="位置" width="180">
-            <template #default="{ row }">
-              <span class="position-text">
-                ({{ row.bounds.x }}, {{ row.bounds.y }})
-                {{ row.bounds.width }}x{{ row.bounds.height }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="150" fixed="right">
-            <template #default="{ row }">
-              <el-button-group size="small">
-                <el-tooltip content="查看详情">
-                  <el-button :icon="View" @click="viewElement(row)" />
-                </el-tooltip>
-                <el-tooltip content="高亮显示">
-                  <el-button :icon="Aim" @click="highlightElement(row)" />
-                </el-tooltip>
-                <el-tooltip content="删除">
-                  <el-button :icon="Delete" type="danger" @click="removeElement(row.id)" />
-                </el-tooltip>
-              </el-button-group>
-            </template>
-          </el-table-column>
-        </el-table>
+          <FileText :size="64" class="empty-icon" />
+          <p>此元素库暂无元素，点击上方按钮开始捕获</p>
+        </div>
+
+        <table v-else class="data-table">
+          <thead>
+            <tr>
+              <th>元素名称</th>
+              <th>控件类型</th>
+              <th>进程</th>
+              <th>窗口标题</th>
+              <th>位置</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="element in elementStore.currentLibrary.elements" :key="element.id">
+              <td>
+                <span class="element-name">{{ element.name }}</span>
+              </td>
+              <td>
+                <span class="tag tag-info">{{ element.controlType }}</span>
+              </td>
+              <td>{{ element.processName }}</td>
+              <td class="cell-ellipsis" :title="element.windowTitle">{{ element.windowTitle }}</td>
+              <td>
+                <span class="position-text">
+                  ({{ element.bounds.x }}, {{ element.bounds.y }})
+                  {{ element.bounds.width }}x{{ element.bounds.height }}
+                </span>
+              </td>
+              <td>
+                <div class="action-buttons">
+                  <button class="btn-icon" title="查看详情" @click="viewElement(element)">
+                    <Eye :size="14" />
+                  </button>
+                  <button class="btn-icon" title="高亮显示" @click="highlightElement(element)">
+                    <Crosshair :size="14" />
+                  </button>
+                  <button class="btn-icon btn-icon-danger" title="删除" @click="removeElement(element.id)">
+                    <Trash2 :size="14" />
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
     <!-- Create library dialog -->
-    <el-dialog v-model="showCreateDialog" title="新建元素库" width="400px">
-      <el-form @submit.prevent="createLibrary">
-        <el-form-item label="库名称">
-          <el-input
-            v-model="newLibraryName"
-            placeholder="请输入元素库名称"
-            autofocus
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showCreateDialog = false">取消</el-button>
-        <el-button type="primary" @click="createLibrary" :disabled="!newLibraryName.trim()">
-          创建
-        </el-button>
-      </template>
-    </el-dialog>
+    <div v-if="showCreateDialog" class="dialog-overlay" @click.self="showCreateDialog = false">
+      <div class="dialog">
+        <div class="dialog-header">
+          <span>新建元素库</span>
+          <button class="btn-icon" @click="showCreateDialog = false">
+            <X :size="18" />
+          </button>
+        </div>
+        <div class="dialog-body">
+          <div class="form-item">
+            <label class="form-label">库名称</label>
+            <input
+              v-model="newLibraryName"
+              class="input"
+              placeholder="请输入元素库名称"
+              @keyup.enter="createLibrary"
+            />
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button class="btn" @click="showCreateDialog = false">取消</button>
+          <button class="btn btn-primary" @click="createLibrary" :disabled="!newLibraryName.trim()">
+            创建
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Confirm dialog -->
+    <div v-if="showConfirmDialog" class="dialog-overlay" @click.self="showConfirmDialog = false">
+      <div class="dialog dialog-small">
+        <div class="dialog-header">
+          <span>{{ confirmDialogData?.title }}</span>
+          <button class="btn-icon" @click="showConfirmDialog = false">
+            <X :size="18" />
+          </button>
+        </div>
+        <div class="dialog-body">
+          <p>{{ confirmDialogData?.message }}</p>
+        </div>
+        <div class="dialog-footer">
+          <button class="btn" @click="showConfirmDialog = false">取消</button>
+          <button class="btn btn-danger" @click="handleConfirm">确认</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Element picker dialog -->
     <ElementPicker
@@ -231,66 +298,83 @@ async function highlightElement(element: UIElement) {
     />
 
     <!-- Element detail dialog -->
-    <el-dialog
-      v-model="showElementDetail"
-      :title="elementStore.selectedElement?.name || '元素详情'"
-      width="600px"
-    >
-      <template v-if="elementStore.selectedElement">
-        <el-descriptions :column="2" border>
-          <el-descriptions-item label="ID">
-            {{ elementStore.selectedElement.id }}
-          </el-descriptions-item>
-          <el-descriptions-item label="名称">
-            {{ elementStore.selectedElement.name }}
-          </el-descriptions-item>
-          <el-descriptions-item label="控件类型">
-            {{ elementStore.selectedElement.controlType }}
-          </el-descriptions-item>
-          <el-descriptions-item label="自动化ID">
-            {{ elementStore.selectedElement.automationId || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="类名">
-            {{ elementStore.selectedElement.className || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="进程">
-            {{ elementStore.selectedElement.processName || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="窗口标题" :span="2">
-            {{ elementStore.selectedElement.windowTitle || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="XPath" :span="2">
-            {{ elementStore.selectedElement.xpath || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="CSS选择器" :span="2">
-            {{ elementStore.selectedElement.cssSelector || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="位置">
-            ({{ elementStore.selectedElement.bounds.x }}, {{ elementStore.selectedElement.bounds.y }})
-          </el-descriptions-item>
-          <el-descriptions-item label="大小">
-            {{ elementStore.selectedElement.bounds.width }} x {{ elementStore.selectedElement.bounds.height }}
-          </el-descriptions-item>
-          <el-descriptions-item label="创建时间" :span="2">
-            {{ elementStore.selectedElement.createdAt }}
-          </el-descriptions-item>
-        </el-descriptions>
-
-        <!-- Attributes -->
-        <div v-if="Object.keys(elementStore.selectedElement.attributes || {}).length > 0" class="attributes-section">
-          <h4>扩展属性</h4>
-          <el-descriptions :column="2" border size="small">
-            <el-descriptions-item
-              v-for="(value, key) in elementStore.selectedElement.attributes"
-              :key="key"
-              :label="String(key)"
-            >
-              {{ value }}
-            </el-descriptions-item>
-          </el-descriptions>
+    <div v-if="showElementDetail" class="dialog-overlay" @click.self="showElementDetail = false">
+      <div class="dialog dialog-large">
+        <div class="dialog-header">
+          <span>{{ elementStore.selectedElement?.name || '元素详情' }}</span>
+          <button class="btn-icon" @click="showElementDetail = false">
+            <X :size="18" />
+          </button>
         </div>
-      </template>
-    </el-dialog>
+        <div v-if="elementStore.selectedElement" class="dialog-body">
+          <div class="detail-grid">
+            <div class="detail-item">
+              <span class="detail-label">ID</span>
+              <span class="detail-value">{{ elementStore.selectedElement.id }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">名称</span>
+              <span class="detail-value">{{ elementStore.selectedElement.name }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">控件类型</span>
+              <span class="detail-value">{{ elementStore.selectedElement.controlType }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">自动化ID</span>
+              <span class="detail-value">{{ elementStore.selectedElement.automationId || '-' }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">类名</span>
+              <span class="detail-value">{{ elementStore.selectedElement.className || '-' }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">进程</span>
+              <span class="detail-value">{{ elementStore.selectedElement.processName || '-' }}</span>
+            </div>
+            <div class="detail-item detail-item-full">
+              <span class="detail-label">窗口标题</span>
+              <span class="detail-value">{{ elementStore.selectedElement.windowTitle || '-' }}</span>
+            </div>
+            <div class="detail-item detail-item-full">
+              <span class="detail-label">XPath</span>
+              <span class="detail-value detail-value-code">{{ elementStore.selectedElement.xpath || '-' }}</span>
+            </div>
+            <div class="detail-item detail-item-full">
+              <span class="detail-label">CSS选择器</span>
+              <span class="detail-value detail-value-code">{{ elementStore.selectedElement.cssSelector || '-' }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">位置</span>
+              <span class="detail-value">({{ elementStore.selectedElement.bounds.x }}, {{ elementStore.selectedElement.bounds.y }})</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">大小</span>
+              <span class="detail-value">{{ elementStore.selectedElement.bounds.width }} x {{ elementStore.selectedElement.bounds.height }}</span>
+            </div>
+            <div class="detail-item detail-item-full">
+              <span class="detail-label">创建时间</span>
+              <span class="detail-value">{{ elementStore.selectedElement.createdAt }}</span>
+            </div>
+          </div>
+
+          <!-- Attributes -->
+          <div v-if="Object.keys(elementStore.selectedElement.attributes || {}).length > 0" class="attributes-section">
+            <h4>扩展属性</h4>
+            <div class="detail-grid">
+              <div
+                v-for="(value, key) in elementStore.selectedElement.attributes"
+                :key="key"
+                class="detail-item"
+              >
+                <span class="detail-label">{{ key }}</span>
+                <span class="detail-value">{{ value }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -298,13 +382,56 @@ async function highlightElement(element: UIElement) {
 .element-library {
   height: 100%;
   display: flex;
-  background: var(--el-bg-color-page);
+  background: #f9fafb;
+  position: relative;
+}
+
+.toast-container {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toast {
+  padding: 12px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  animation: slideIn 0.3s ease;
+}
+
+.toast-success {
+  background: #22c55e;
+}
+
+.toast-error {
+  background: #ef4444;
+}
+
+.toast-warning {
+  background: #f59e0b;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 
 .library-sidebar {
   width: 280px;
-  background: var(--el-bg-color);
-  border-right: 1px solid var(--el-border-color-light);
+  background: #fff;
+  border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
 }
@@ -314,7 +441,7 @@ async function highlightElement(element: UIElement) {
   justify-content: space-between;
   align-items: center;
   padding: 16px;
-  border-bottom: 1px solid var(--el-border-color-light);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .sidebar-header h3 {
@@ -323,9 +450,15 @@ async function highlightElement(element: UIElement) {
   font-weight: 500;
 }
 
+.btn-small {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
 .library-list {
   flex: 1;
   padding: 8px;
+  overflow-y: auto;
 }
 
 .library-item {
@@ -340,12 +473,12 @@ async function highlightElement(element: UIElement) {
 }
 
 .library-item:hover {
-  background: var(--el-fill-color-light);
+  background: #f3f4f6;
 }
 
 .library-item.active {
-  background: var(--el-color-primary-light-9);
-  border: 1px solid var(--el-color-primary-light-5);
+  background: #dbeafe;
+  border: 1px solid #93c5fd;
 }
 
 .library-item-content {
@@ -354,9 +487,8 @@ async function highlightElement(element: UIElement) {
   gap: 12px;
 }
 
-.library-item-content .el-icon {
-  font-size: 20px;
-  color: var(--el-color-primary);
+.library-icon {
+  color: #3b82f6;
 }
 
 .library-item-info {
@@ -367,21 +499,60 @@ async function highlightElement(element: UIElement) {
 .library-name {
   font-size: 14px;
   font-weight: 500;
-  color: var(--el-text-color-primary);
+  color: #1f2937;
 }
 
 .library-count {
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: #6b7280;
 }
 
 .library-delete-btn {
   opacity: 0;
   transition: opacity 0.2s;
+  background: transparent;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: #ef4444;
+  border-radius: 4px;
+}
+
+.library-delete-btn:hover {
+  background: #fef2f2;
 }
 
 .library-item:hover .library-delete-btn {
   opacity: 1;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 20px;
+  color: #9ca3af;
+}
+
+.empty-state-large {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 60px;
+  color: #9ca3af;
+}
+
+.empty-state-large p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.empty-icon {
+  color: #d1d5db;
 }
 
 .library-main {
@@ -396,8 +567,8 @@ async function highlightElement(element: UIElement) {
   justify-content: space-between;
   align-items: center;
   padding: 16px 24px;
-  background: var(--el-bg-color);
-  border-bottom: 1px solid var(--el-border-color-light);
+  background: #fff;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .main-header h3 {
@@ -412,20 +583,216 @@ async function highlightElement(element: UIElement) {
   overflow: auto;
 }
 
-.element-name-cell {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.data-table th,
+.data-table td {
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.data-table th {
+  background: #f9fafb;
+  font-weight: 500;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.data-table td {
+  font-size: 14px;
+  color: #1f2937;
+}
+
+.data-table tr:hover td {
+  background: #f9fafb;
+}
+
+.cell-ellipsis {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.element-name {
+  font-weight: 500;
+}
+
+.tag {
+  display: inline-flex;
+  padding: 2px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+}
+
+.tag-info {
+  background: #e0f2fe;
+  color: #0369a1;
 }
 
 .position-text {
   font-family: monospace;
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: #6b7280;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #6b7280;
+}
+
+.btn-icon:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.btn-icon-danger:hover {
+  background: #fef2f2;
+  color: #ef4444;
+}
+
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog {
+  width: 400px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+}
+
+.dialog-small {
+  width: 360px;
+}
+
+.dialog-large {
+  width: 600px;
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+  font-weight: 500;
+  font-size: 16px;
+}
+
+.dialog-body {
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.dialog-body p {
+  margin: 0;
+  color: #374151;
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-color);
+}
+
+.btn-danger {
+  background: #ef4444;
+  color: #fff;
+}
+
+.btn-danger:hover {
+  background: #dc2626;
+}
+
+.form-item {
+  margin-bottom: 16px;
+}
+
+.form-item:last-child {
+  margin-bottom: 0;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+.detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detail-item-full {
+  grid-column: span 2;
+}
+
+.detail-label {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.detail-value {
+  font-size: 14px;
+  color: #1f2937;
+  word-break: break-all;
+}
+
+.detail-value-code {
+  font-family: monospace;
+  font-size: 12px;
+  background: #f3f4f6;
+  padding: 4px 8px;
+  border-radius: 4px;
 }
 
 .attributes-section {
-  margin-top: 16px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
 }
 
 .attributes-section h4 {

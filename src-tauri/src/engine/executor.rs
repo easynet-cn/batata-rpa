@@ -6,6 +6,7 @@ use crate::automation::desktop;
 use crate::automation::file::FileAutomation;
 use crate::automation::web::{BrowserOptions, WebAutomation};
 use crate::automation::ClickType;
+use crate::plugin::{PluginRegistry, LuaPluginExecutor};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::future::Future;
@@ -88,6 +89,7 @@ pub struct Executor {
     automation: Box<dyn desktop::DesktopAutomation>,
     file_automation: FileAutomation,
     web_automation: Arc<WebAutomation>,
+    plugin_executor: Option<LuaPluginExecutor>,
 }
 
 impl Executor {
@@ -98,6 +100,19 @@ impl Executor {
             automation: desktop::create_automation(),
             file_automation: FileAutomation::new(),
             web_automation: Arc::new(WebAutomation::new()),
+            plugin_executor: None,
+        }
+    }
+
+    /// Create executor with plugin support
+    pub fn with_plugin_registry(workflow: Workflow, registry: Arc<PluginRegistry>) -> Self {
+        Self {
+            runtime: Arc::new(Runtime::new(workflow.id.clone())),
+            workflow,
+            automation: desktop::create_automation(),
+            file_automation: FileAutomation::new(),
+            web_automation: Arc::new(WebAutomation::new()),
+            plugin_executor: Some(LuaPluginExecutor::new(registry)),
         }
     }
 
@@ -241,9 +256,36 @@ impl Executor {
             // Special nodes handled in execute_from_node
             "condition" | "loop" | "forEach" | "tryCatch" => Ok(()),
             _ => {
+                // Try plugin handlers for unknown node types
+                if let Some(ref plugin_executor) = self.plugin_executor {
+                    if plugin_executor.can_handle(&node.node_type).await {
+                        self.runtime
+                            .add_log(
+                                ExecutionLog::info(format!(
+                                    "Executing plugin node: {}",
+                                    node.node_type
+                                ))
+                                .with_node(&node.id),
+                            )
+                            .await;
+
+                        let node_data = serde_json::to_value(&node.data).unwrap_or_default();
+
+                        return crate::plugin::execute_plugin_node(
+                            plugin_executor,
+                            &node.node_type,
+                            &node.id,
+                            node_data,
+                            self.runtime.clone(),
+                        )
+                        .await
+                        .map_err(|e| EngineError::ExecutionFailed(e.to_string()));
+                    }
+                }
+
                 self.runtime
                     .add_log(
-                        ExecutionLog::info(format!("Unknown node type: {}", node.node_type))
+                        ExecutionLog::warn(format!("Unknown node type: {}", node.node_type))
                             .with_node(&node.id),
                     )
                     .await;

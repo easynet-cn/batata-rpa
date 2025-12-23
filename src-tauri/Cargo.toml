@@ -66,6 +66,9 @@ toml = "0.8"
 # App directories
 directories = "5"
 
+# Lua scripting for plugins
+mlua = { version = "0.10", features = ["lua54", "vendored", "async", "send", "serialize"] }
+
 # Platform-specific UI automation
 [target.'cfg(windows)'.dependencies]
 uiautomation = "0.19"

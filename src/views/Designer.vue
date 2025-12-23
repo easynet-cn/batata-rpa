@@ -5,9 +5,8 @@ import type { Node, Edge } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
 import { MiniMap } from '@vue-flow/minimap';
-import { VideoPlay, Download, CaretRight, VideoPause, SwitchFilled, Aim, ArrowDown, VideoCamera, FolderOpened, Document } from '@element-plus/icons-vue';
+import { Play, Download, ChevronRight, Pause, StepForward, Crosshair, ChevronDown, Video, FolderOpen, FileText } from 'lucide-vue-next';
 import { invoke } from '@tauri-apps/api/core';
-import { ElMessage } from 'element-plus';
 import { useWorkflowStore, useExecutionStore, type DebugMode } from '@/stores';
 import { useRecorderStore } from '@/stores/recorder';
 import { NODE_CONFIGS, type NodeType } from '@/types';
@@ -22,6 +21,18 @@ import ActionNode from '@/components/designer/nodes/ActionNode.vue';
 import ConditionNode from '@/components/designer/nodes/ConditionNode.vue';
 import LoopNode from '@/components/designer/nodes/LoopNode.vue';
 import TryCatchNode from '@/components/designer/nodes/TryCatchNode.vue';
+
+// Simple toast notification system
+const toasts = ref<{ id: number; message: string; type: 'success' | 'error' | 'warning' }[]>([]);
+let toastId = 0;
+
+function showToast(message: string, type: 'success' | 'error' | 'warning' = 'success') {
+  const id = ++toastId;
+  toasts.value.push({ id, message, type });
+  setTimeout(() => {
+    toasts.value = toasts.value.filter(t => t.id !== id);
+  }, 3000);
+}
 
 const workflowStore = useWorkflowStore();
 const executionStore = useExecutionStore();
@@ -208,12 +219,12 @@ async function runWorkflow() {
     };
 
     await invoke('execute_workflow', { workflow: workflowData });
-    ElMessage.success('流程开始执行');
+    showToast('流程开始执行', 'success');
 
     // Poll execution state
     pollExecutionState(workflowStore.currentWorkflow.id);
   } catch (error) {
-    ElMessage.error(`执行失败: ${error}`);
+    showToast(`执行失败: ${error}`, 'error');
     executionStore.failExecution(String(error));
     isRunning.value = false;
   }
@@ -252,10 +263,10 @@ async function pollExecutionState(workflowId: string) {
         executionStore.setCurrentNode(''); // Clear highlighting
       }
       if (typedState.status === 'Completed') {
-        ElMessage.success('流程执行完成');
+        showToast('流程执行完成', 'success');
         executionStore.stopExecution();
       } else if (typedState.status === 'Failed') {
-        ElMessage.error('流程执行失败');
+        showToast('流程执行失败', 'error');
       }
     }
   } catch {
@@ -290,9 +301,9 @@ async function loadExample(filename: string) {
     const json = await response.text();
     workflowStore.loadFromJson(json);
     syncFromStore();
-    ElMessage.success('示例流程加载成功');
+    showToast('示例流程加载成功', 'success');
   } catch (error) {
-    ElMessage.error(`加载示例失败: ${error}`);
+    showToast(`加载示例失败: ${error}`, 'error');
   }
 }
 
@@ -325,12 +336,12 @@ async function runDebugWorkflow(mode: DebugMode) {
     };
 
     await invoke('execute_workflow_debug', { workflow: workflowData, debugMode: mode });
-    ElMessage.success(`调试模式开始: ${mode === 'step' ? '单步执行' : '断点调试'}`);
+    showToast(`调试模式开始: ${mode === 'step' ? '单步执行' : '断点调试'}`, 'success');
 
     // Poll execution state with variable updates
     pollDebugExecutionState(workflowStore.currentWorkflow.id);
   } catch (error) {
-    ElMessage.error(`调试失败: ${error}`);
+    showToast(`调试失败: ${error}`, 'error');
     executionStore.failExecution(String(error));
     executionStore.setDebugMode('none');
     isRunning.value = false;
@@ -343,7 +354,7 @@ async function stepExecution() {
   try {
     await invoke('step_execution', { workflowId: workflowStore.currentWorkflow.id });
   } catch (error) {
-    ElMessage.error(`单步执行失败: ${error}`);
+    showToast(`单步执行失败: ${error}`, 'error');
   }
 }
 
@@ -354,7 +365,7 @@ async function resumeDebugExecution() {
     await invoke('resume_execution', { workflowId: workflowStore.currentWorkflow.id });
     executionStore.resumeExecution();
   } catch (error) {
-    ElMessage.error(`继续执行失败: ${error}`);
+    showToast(`继续执行失败: ${error}`, 'error');
   }
 }
 
@@ -401,10 +412,10 @@ async function pollDebugExecutionState(workflowId: string) {
         executionStore.setCurrentNode('');
       }
       if (typedState.status === 'Completed') {
-        ElMessage.success('调试执行完成');
+        showToast('调试执行完成', 'success');
         executionStore.stopExecution();
       } else if (typedState.status === 'Failed') {
-        ElMessage.error('调试执行失败');
+        showToast('调试执行失败', 'error');
       }
     }
   } catch {
@@ -416,78 +427,88 @@ async function pollDebugExecutionState(workflowId: string) {
 
 <template>
   <div class="designer-container">
+    <!-- Toast notifications -->
+    <div class="toast-container">
+      <div
+        v-for="toast in toasts"
+        :key="toast.id"
+        class="toast"
+        :class="[`toast-${toast.type}`]"
+      >
+        {{ toast.message }}
+      </div>
+    </div>
+
     <div class="designer-toolbar">
-      <el-button-group>
-        <el-button type="primary" @click="runWorkflow" :loading="isRunning && !isDebugging" :disabled="isRunning">
-          <el-icon><VideoPlay /></el-icon>
-          运行
-        </el-button>
-        <el-dropdown @command="runDebugWorkflow" :disabled="isRunning">
-          <el-button :disabled="isRunning">
-            <el-icon><Aim /></el-icon>
+      <div class="btn-group">
+        <button class="btn btn-primary" @click="runWorkflow" :disabled="isRunning">
+          <Play :size="14" />
+          {{ isRunning && !isDebugging ? '执行中...' : '运行' }}
+        </button>
+        <div class="dropdown">
+          <button class="btn" :disabled="isRunning">
+            <Crosshair :size="14" />
             调试
-            <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-          </el-button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="step">
-                <el-icon><SwitchFilled /></el-icon>
-                单步执行
-              </el-dropdown-item>
-              <el-dropdown-item command="breakpoint">
-                <el-icon><Aim /></el-icon>
-                断点调试
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-      </el-button-group>
+            <ChevronDown :size="14" />
+          </button>
+          <div class="dropdown-menu">
+            <button class="dropdown-item" @click="runDebugWorkflow('step')" :disabled="isRunning">
+              <StepForward :size="14" />
+              单步执行
+            </button>
+            <button class="dropdown-item" @click="runDebugWorkflow('breakpoint')" :disabled="isRunning">
+              <Crosshair :size="14" />
+              断点调试
+            </button>
+          </div>
+        </div>
+      </div>
 
       <!-- Debug controls (visible during debugging) -->
-      <el-button-group v-if="isDebugging && isRunning">
-        <el-button type="success" @click="stepExecution" :disabled="!isPaused">
-          <el-icon><CaretRight /></el-icon>
+      <div v-if="isDebugging && isRunning" class="btn-group">
+        <button class="btn btn-success" @click="stepExecution" :disabled="!isPaused">
+          <ChevronRight :size="14" />
           单步
-        </el-button>
-        <el-button type="warning" @click="resumeDebugExecution" :disabled="!isPaused">
-          <el-icon><VideoPlay /></el-icon>
+        </button>
+        <button class="btn btn-warning" @click="resumeDebugExecution" :disabled="!isPaused">
+          <Play :size="14" />
           继续
-        </el-button>
-        <el-button type="danger" @click="() => { isRunning = false; executionStore.setDebugMode('none'); }">
-          <el-icon><VideoPause /></el-icon>
+        </button>
+        <button class="btn btn-danger" @click="() => { isRunning = false; executionStore.setDebugMode('none'); }">
+          <Pause :size="14" />
           停止
-        </el-button>
-      </el-button-group>
+        </button>
+      </div>
 
-      <el-tag v-if="isDebugging" type="warning" class="debug-tag">
+      <span v-if="isDebugging" class="tag tag-warning">
         {{ debugMode === 'step' ? '单步调试' : '断点调试' }}
         {{ isPaused ? '(已暂停)' : '' }}
-      </el-tag>
+      </span>
 
-      <el-button @click="saveWorkflow" :disabled="isRunning">
-        <el-icon><Download /></el-icon>
+      <button class="btn" @click="saveWorkflow" :disabled="isRunning">
+        <Download :size="14" />
         保存
-      </el-button>
+      </button>
 
-      <el-dropdown @command="loadExample" :disabled="isRunning">
-        <el-button :disabled="isRunning">
-          <el-icon><FolderOpened /></el-icon>
+      <div class="dropdown">
+        <button class="btn" :disabled="isRunning">
+          <FolderOpen :size="14" />
           示例
-          <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-        </el-button>
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item
-              v-for="example in exampleWorkflows"
-              :key="example.file"
-              :command="example.file"
-            >
-              <el-icon><Document /></el-icon>
-              {{ example.name }}
-            </el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
+          <ChevronDown :size="14" />
+        </button>
+        <div class="dropdown-menu">
+          <button
+            v-for="example in exampleWorkflows"
+            :key="example.file"
+            class="dropdown-item"
+            @click="loadExample(example.file)"
+            :disabled="isRunning"
+          >
+            <FileText :size="14" />
+            {{ example.name }}
+          </button>
+        </div>
+      </div>
 
       <span class="workflow-name">{{ workflowStore.currentWorkflow?.name }}</span>
     </div>
@@ -593,26 +614,45 @@ async function pollDebugExecutionState(workflowId: string) {
       </div>
 
       <div class="designer-right-panel">
-        <el-tabs v-model="rightPanelTab" class="panel-tabs">
-          <el-tab-pane label="属性" name="properties">
-            <PropertyPanel />
-          </el-tab-pane>
-          <el-tab-pane label="变量" name="variables">
-            <VariablePanel />
-          </el-tab-pane>
-          <el-tab-pane label="调试" name="debug">
-            <DebugPanel />
-          </el-tab-pane>
-          <el-tab-pane name="recorder">
-            <template #label>
-              <span class="recorder-tab-label">
-                <el-icon v-if="!recorderStore.isIdle" class="recording-indicator"><VideoCamera /></el-icon>
-                录制
-              </span>
-            </template>
-            <RecorderPanel />
-          </el-tab-pane>
-        </el-tabs>
+        <div class="panel-tabs">
+          <div class="tabs-header">
+            <button
+              class="tab-btn"
+              :class="{ active: rightPanelTab === 'properties' }"
+              @click="rightPanelTab = 'properties'"
+            >
+              属性
+            </button>
+            <button
+              class="tab-btn"
+              :class="{ active: rightPanelTab === 'variables' }"
+              @click="rightPanelTab = 'variables'"
+            >
+              变量
+            </button>
+            <button
+              class="tab-btn"
+              :class="{ active: rightPanelTab === 'debug' }"
+              @click="rightPanelTab = 'debug'"
+            >
+              调试
+            </button>
+            <button
+              class="tab-btn"
+              :class="{ active: rightPanelTab === 'recorder' }"
+              @click="rightPanelTab = 'recorder'"
+            >
+              <Video v-if="!recorderStore.isIdle" :size="14" class="recording-indicator" />
+              录制
+            </button>
+          </div>
+          <div class="tab-content">
+            <PropertyPanel v-show="rightPanelTab === 'properties'" />
+            <VariablePanel v-show="rightPanelTab === 'variables'" />
+            <DebugPanel v-show="rightPanelTab === 'debug'" />
+            <RecorderPanel v-show="rightPanelTab === 'recorder'" />
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -623,6 +663,49 @@ async function pollDebugExecutionState(workflowId: string) {
   height: 100%;
   display: flex;
   flex-direction: column;
+  position: relative;
+}
+
+.toast-container {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toast {
+  padding: 12px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  animation: slideIn 0.3s ease;
+}
+
+.toast-success {
+  background: #22c55e;
+}
+
+.toast-error {
+  background: #ef4444;
+}
+
+.toast-warning {
+  background: #f59e0b;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 
 .designer-toolbar {
@@ -631,13 +714,115 @@ async function pollDebugExecutionState(workflowId: string) {
   display: flex;
   align-items: center;
   gap: 16px;
-  border-bottom: 1px solid var(--el-border-color);
-  background: var(--el-bg-color);
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-color);
+}
+
+.btn-group {
+  display: flex;
+  gap: 0;
+}
+
+.btn-group .btn {
+  border-radius: 0;
+}
+
+.btn-group .btn:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.btn-group .btn:last-child,
+.btn-group .dropdown:last-child .btn {
+  border-radius: 0 6px 6px 0;
+}
+
+.btn-group .dropdown .btn {
+  border-radius: 0;
+}
+
+.dropdown {
+  position: relative;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  min-width: 150px;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+  display: none;
+}
+
+.dropdown:hover .dropdown-menu,
+.dropdown:focus-within .dropdown-menu {
+  display: block;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  color: #374151;
+  cursor: pointer;
+  text-align: left;
+}
+
+.dropdown-item:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+
+.dropdown-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-success {
+  background: #22c55e;
+  color: #fff;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: #16a34a;
+}
+
+.btn-warning {
+  background: #f59e0b;
+  color: #fff;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background: #d97706;
+}
+
+.btn-danger {
+  background: #ef4444;
+  color: #fff;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #dc2626;
+}
+
+.tag-warning {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fcd34d;
 }
 
 .workflow-name {
-  color: var(--el-text-color-secondary);
+  color: var(--text-secondary);
   font-size: 14px;
+  margin-left: auto;
 }
 
 .designer-body {
@@ -648,8 +833,8 @@ async function pollDebugExecutionState(workflowId: string) {
 
 .designer-palette {
   width: 200px;
-  border-right: 1px solid var(--el-border-color);
-  background: var(--el-bg-color);
+  border-right: 1px solid var(--border-color);
+  background: var(--bg-color);
 }
 
 .designer-canvas {
@@ -659,8 +844,8 @@ async function pollDebugExecutionState(workflowId: string) {
 
 .designer-right-panel {
   width: 280px;
-  border-left: 1px solid var(--el-border-color);
-  background: var(--el-bg-color);
+  border-left: 1px solid var(--border-color);
+  background: var(--bg-color);
   display: flex;
   flex-direction: column;
 }
@@ -671,31 +856,47 @@ async function pollDebugExecutionState(workflowId: string) {
   flex-direction: column;
 }
 
-.panel-tabs :deep(.el-tabs__content) {
-  flex: 1;
-  overflow: hidden;
+.tabs-header {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  background: #f9fafb;
 }
 
-.panel-tabs :deep(.el-tab-pane) {
-  height: 100%;
+.tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  color: #6b7280;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.tab-btn:hover {
+  color: #374151;
+}
+
+.tab-btn.active {
+  color: #3b82f6;
+  border-bottom-color: #3b82f6;
+  background: #fff;
+}
+
+.tab-content {
+  flex: 1;
+  overflow: hidden;
 }
 
 .vue-flow {
   height: 100%;
 }
 
-.debug-tag {
-  margin-left: 8px;
-}
-
-.recorder-tab-label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
 .recording-indicator {
-  color: var(--el-color-danger);
+  color: #ef4444;
   animation: pulse 1s infinite;
 }
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { Handle, Position } from '@vue-flow/core';
-import { Refresh } from '@element-plus/icons-vue';
+import { RefreshCw } from 'lucide-vue-next';
 import { useExecutionStore } from '@/stores';
 
 const props = defineProps<{
@@ -18,7 +18,7 @@ const isExecuting = computed(() => executionStore.state?.currentNodeId === props
   <div class="loop-node" :class="{ executing: isExecuting }">
     <Handle type="target" :position="Position.Top" />
     <div class="node-header">
-      <el-icon :size="14" color="#fff"><Refresh /></el-icon>
+      <RefreshCw :size="14" class="text-white" />
       <span>循环</span>
     </div>
     <div class="node-body">
@@ -52,7 +52,7 @@ const isExecuting = computed(() => executionStore.state?.currentNodeId === props
 .loop-node {
   min-width: 160px;
   background: #fff;
-  border: 2px solid #909399;
+  border: 2px solid #6b7280;
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -63,7 +63,7 @@ const isExecuting = computed(() => executionStore.state?.currentNodeId === props
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  background: #909399;
+  background: #6b7280;
   color: #fff;
   font-size: 12px;
   font-weight: 500;
@@ -78,21 +78,21 @@ const isExecuting = computed(() => executionStore.state?.currentNodeId === props
 
 .node-label {
   font-size: 13px;
-  color: var(--el-text-color-primary);
+  color: #1f2937;
 }
 
 .loop-info {
   font-size: 11px;
-  color: var(--el-text-color-secondary);
+  color: #6b7280;
 }
 
 .node-outputs {
   display: flex;
   justify-content: space-around;
   padding: 6px 10px;
-  border-top: 1px solid var(--el-border-color-lighter);
+  border-top: 1px solid #e5e7eb;
   font-size: 11px;
-  color: var(--el-text-color-secondary);
+  color: #6b7280;
 }
 
 .output-body, .output-done {
@@ -101,24 +101,24 @@ const isExecuting = computed(() => executionStore.state?.currentNodeId === props
 }
 
 .output-body span {
-  color: #409eff;
+  color: #3b82f6;
 }
 
 .output-done span {
-  color: #67c23a;
+  color: #22c55e;
 }
 
 .loop-node.executing {
-  box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.5), 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5), 0 2px 8px rgba(0, 0, 0, 0.15);
   animation: pulse 1.5s infinite;
 }
 
 @keyframes pulse {
   0%, 100% {
-    box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.5), 0 2px 8px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5), 0 2px 8px rgba(0, 0, 0, 0.15);
   }
   50% {
-    box-shadow: 0 0 0 6px rgba(64, 158, 255, 0.3), 0 2px 8px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.3), 0 2px 8px rgba(0, 0, 0, 0.15);
   }
 }
 </style>

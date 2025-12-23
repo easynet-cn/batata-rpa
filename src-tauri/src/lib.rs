@@ -2,27 +2,75 @@ pub mod automation;
 pub mod commands;
 pub mod element;
 pub mod engine;
+pub mod plugin;
 pub mod recorder;
 pub mod storage;
 
 use commands::execution::ExecutorState;
 use commands::recorder::RecorderState;
+use plugin::{PluginRegistry, PluginLoader};
+use std::sync::Arc;
+use tauri::Manager;
+
+/// Global plugin state
+pub struct PluginState {
+    pub registry: Arc<PluginRegistry>,
+}
+
+impl PluginState {
+    pub fn new() -> Self {
+        Self {
+            registry: Arc::new(PluginRegistry::new()),
+        }
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::init();
 
+    let plugin_state = PluginState::new();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(ExecutorState::new())
         .manage(RecorderState::new())
-        .setup(|_app| {
+        .manage(plugin_state)
+        .setup(|app| {
             // Initialize database on startup
             tauri::async_runtime::block_on(async {
                 if let Err(e) = storage::init_database().await {
                     log::error!("Failed to initialize database: {}", e);
                 }
             });
+
+            // Load plugins from plugins directory
+            let plugins_dir = app
+                .path()
+                .app_data_dir()
+                .map(|p: std::path::PathBuf| p.join("plugins"))
+                .unwrap_or_else(|_| std::path::PathBuf::from("plugins"));
+
+            // Create plugins directory if it doesn't exist
+            if let Err(e) = std::fs::create_dir_all(&plugins_dir) {
+                log::warn!("Failed to create plugins directory: {}", e);
+            }
+
+            // Load plugins using the plugin_state we created earlier
+            let registry = Arc::new(PluginRegistry::new());
+            let registry_clone = registry.clone();
+            tauri::async_runtime::block_on(async move {
+                let loader = PluginLoader::new(registry_clone);
+                match loader.load_directory(&plugins_dir).await {
+                    Ok(plugins) => {
+                        log::info!("Loaded {} plugins from {:?}", plugins.len(), plugins_dir);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to load plugins: {}", e);
+                    }
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

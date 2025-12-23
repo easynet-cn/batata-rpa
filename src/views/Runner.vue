@@ -1,17 +1,17 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
-import { ElMessage } from 'element-plus';
 import { useExecutionStore, useWorkflowStore } from '@/stores';
 import {
-  VideoPlay,
-  VideoPause,
-  Close,
-  SuccessFilled,
-  WarningFilled,
-  CircleCloseFilled,
-  Delete,
-} from '@element-plus/icons-vue';
+  Play,
+  Pause,
+  X,
+  CheckCircle,
+  AlertTriangle,
+  XCircle,
+  Trash2,
+  FileText,
+} from 'lucide-vue-next';
 
 const executionStore = useExecutionStore();
 const workflowStore = useWorkflowStore();
@@ -19,6 +19,18 @@ const workflowStore = useWorkflowStore();
 const logFilter = ref('all');
 const isExecuting = ref(false);
 const logListRef = ref<HTMLElement | null>(null);
+
+// Toast system
+const toasts = ref<{ id: number; message: string; type: 'success' | 'error' | 'warning' }[]>([]);
+let toastId = 0;
+
+function showToast(message: string, type: 'success' | 'error' | 'warning' = 'success') {
+  const id = ++toastId;
+  toasts.value.push({ id, message, type });
+  setTimeout(() => {
+    toasts.value = toasts.value.filter(t => t.id !== id);
+  }, 3000);
+}
 
 const statusText = computed(() => {
   switch (executionStore.state?.status) {
@@ -35,18 +47,18 @@ const statusText = computed(() => {
   }
 });
 
-const statusType = computed(() => {
+const statusClass = computed(() => {
   switch (executionStore.state?.status) {
     case 'running':
-      return 'primary';
+      return 'tag-primary';
     case 'paused':
-      return 'warning';
+      return 'tag-warning';
     case 'completed':
-      return 'success';
+      return 'tag-success';
     case 'failed':
-      return 'danger';
+      return 'tag-danger';
     default:
-      return 'info';
+      return 'tag-info';
   }
 });
 
@@ -73,28 +85,28 @@ const executionDuration = computed(() => {
 function getLogIcon(level: string) {
   switch (level) {
     case 'error':
-      return CircleCloseFilled;
+      return XCircle;
     case 'warn':
-      return WarningFilled;
+      return AlertTriangle;
     default:
-      return SuccessFilled;
+      return CheckCircle;
   }
 }
 
-function getLogColor(level: string) {
+function getLogClass(level: string) {
   switch (level) {
     case 'error':
-      return 'var(--el-color-danger)';
+      return 'log-error';
     case 'warn':
-      return 'var(--el-color-warning)';
+      return 'log-warning';
     default:
-      return 'var(--el-color-success)';
+      return 'log-info';
   }
 }
 
 async function startExecution() {
   if (!workflowStore.currentWorkflow) {
-    ElMessage.warning('请先选择或创建一个流程');
+    showToast('请先选择或创建一个流程', 'warning');
     return;
   }
 
@@ -122,10 +134,10 @@ async function startExecution() {
     };
 
     await invoke('execute_workflow', { workflow: workflowData });
-    ElMessage.success('流程开始执行');
+    showToast('流程开始执行', 'success');
     pollExecutionState(workflowStore.currentWorkflow.id);
   } catch (error) {
-    ElMessage.error(`执行失败: ${error}`);
+    showToast(`执行失败: ${error}`, 'error');
     executionStore.failExecution(String(error));
     isExecuting.value = false;
   }
@@ -158,10 +170,10 @@ async function pollExecutionState(workflowId: string) {
       isExecuting.value = false;
       executionStore.setCurrentNode('');
       if (state.status === 'Completed') {
-        ElMessage.success('流程执行完成');
+        showToast('流程执行完成', 'success');
         executionStore.stopExecution();
       } else if (state.status === 'Failed') {
-        ElMessage.error('流程执行失败');
+        showToast('流程执行失败', 'error');
       }
     }
   } catch {
@@ -191,6 +203,18 @@ watch(() => executionStore.state?.logs.length, () => {
 
 <template>
   <div class="runner-container">
+    <!-- Toast notifications -->
+    <div class="toast-container">
+      <div
+        v-for="toast in toasts"
+        :key="toast.id"
+        class="toast"
+        :class="[`toast-${toast.type}`]"
+      >
+        {{ toast.message }}
+      </div>
+    </div>
+
     <div class="runner-header">
       <div class="header-left">
         <h3>执行监控</h3>
@@ -199,44 +223,44 @@ watch(() => executionStore.state?.logs.length, () => {
         </span>
       </div>
       <div class="runner-controls">
-        <el-tag :type="statusType" size="large">{{ statusText }}</el-tag>
+        <span class="tag" :class="statusClass">{{ statusText }}</span>
         <span v-if="executionDuration" class="duration">
           耗时: {{ executionDuration }}
         </span>
-        <el-button-group>
-          <el-button
-            type="primary"
+        <div class="btn-group">
+          <button
+            class="btn btn-primary"
             :disabled="isExecuting"
-            :loading="isExecuting"
             @click="startExecution"
           >
-            <el-icon v-if="!isExecuting"><VideoPlay /></el-icon>
+            <Play v-if="!isExecuting" :size="14" />
             {{ isExecuting ? '执行中...' : '开始' }}
-          </el-button>
-          <el-button
+          </button>
+          <button
             v-if="executionStore.isRunning && !executionStore.isPaused"
+            class="btn"
             @click="executionStore.pauseExecution"
           >
-            <el-icon><VideoPause /></el-icon>
+            <Pause :size="14" />
             暂停
-          </el-button>
-          <el-button
+          </button>
+          <button
             v-if="executionStore.isPaused"
-            type="success"
+            class="btn btn-success"
             @click="executionStore.resumeExecution"
           >
-            <el-icon><VideoPlay /></el-icon>
+            <Play :size="14" />
             继续
-          </el-button>
-          <el-button
-            type="danger"
+          </button>
+          <button
+            class="btn btn-danger"
             :disabled="!executionStore.isRunning && !executionStore.isPaused"
             @click="executionStore.stopExecution"
           >
-            <el-icon><Close /></el-icon>
+            <X :size="14" />
             停止
-          </el-button>
-        </el-button-group>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -245,26 +269,30 @@ watch(() => executionStore.state?.logs.length, () => {
         <div class="panel-header">
           <h4>执行日志</h4>
           <div class="log-controls">
-            <el-select v-model="logFilter" size="small" style="width: 100px">
-              <el-option label="全部" value="all" />
-              <el-option label="信息" value="info" />
-              <el-option label="警告" value="warn" />
-              <el-option label="错误" value="error" />
-            </el-select>
-            <el-button size="small" :icon="Delete" @click="clearLogs">清空</el-button>
+            <select v-model="logFilter" class="select select-small">
+              <option value="all">全部</option>
+              <option value="info">信息</option>
+              <option value="warn">警告</option>
+              <option value="error">错误</option>
+            </select>
+            <button class="btn btn-small" @click="clearLogs">
+              <Trash2 :size="14" />
+              清空
+            </button>
           </div>
         </div>
         <div ref="logListRef" class="log-list">
-          <el-empty v-if="!filteredLogs.length" description="暂无日志" />
+          <div v-if="!filteredLogs.length" class="empty-state">
+            <FileText :size="48" class="empty-icon" />
+            <span>暂无日志</span>
+          </div>
           <div
             v-for="log in filteredLogs"
             :key="log.id"
             class="log-item"
             :class="log.level"
           >
-            <el-icon :style="{ color: getLogColor(log.level) }">
-              <component :is="getLogIcon(log.level)" />
-            </el-icon>
+            <component :is="getLogIcon(log.level)" :size="14" :class="getLogClass(log.level)" />
             <span class="log-time">{{ new Date(log.timestamp).toLocaleTimeString() }}</span>
             <span v-if="log.nodeId" class="log-node">[{{ log.nodeId.split('-')[0] }}]</span>
             <span class="log-message">{{ log.message }}</span>
@@ -281,12 +309,15 @@ watch(() => executionStore.state?.logs.length, () => {
       <div class="variable-panel">
         <div class="panel-header">
           <h4>变量状态</h4>
-          <el-tag size="small">
+          <span class="tag tag-info">
             {{ Object.keys(executionStore.state?.variables || {}).length }} 个变量
-          </el-tag>
+          </span>
         </div>
         <div class="variable-list">
-          <el-empty v-if="!Object.keys(executionStore.state?.variables || {}).length" description="暂无变量" />
+          <div v-if="!Object.keys(executionStore.state?.variables || {}).length" class="empty-state">
+            <FileText :size="40" class="empty-icon" />
+            <span>暂无变量</span>
+          </div>
           <div
             v-for="(value, key) in executionStore.state?.variables"
             :key="key"
@@ -307,6 +338,49 @@ watch(() => executionStore.state?.logs.length, () => {
   display: flex;
   flex-direction: column;
   padding: 16px;
+  position: relative;
+}
+
+.toast-container {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toast {
+  padding: 12px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  animation: slideIn 0.3s ease;
+}
+
+.toast-success {
+  background: #22c55e;
+}
+
+.toast-error {
+  background: #ef4444;
+}
+
+.toast-warning {
+  background: #f59e0b;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 
 .runner-header {
@@ -324,10 +398,12 @@ watch(() => executionStore.state?.logs.length, () => {
 
 .header-left h3 {
   margin: 0;
+  font-size: 18px;
+  font-weight: 600;
 }
 
 .workflow-name {
-  color: var(--el-text-color-secondary);
+  color: #6b7280;
   font-size: 14px;
 }
 
@@ -337,9 +413,89 @@ watch(() => executionStore.state?.logs.length, () => {
   gap: 16px;
 }
 
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  font-size: 13px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.tag-info {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.tag-primary {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.tag-success {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.tag-warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.tag-danger {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
 .duration {
-  color: var(--el-text-color-secondary);
+  color: #6b7280;
   font-size: 14px;
+}
+
+.btn-group {
+  display: flex;
+  gap: 0;
+}
+
+.btn-group .btn {
+  border-radius: 0;
+}
+
+.btn-group .btn:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.btn-group .btn:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+.btn-success {
+  background: #22c55e;
+  color: #fff;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: #16a34a;
+}
+
+.btn-danger {
+  background: #ef4444;
+  color: #fff;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #dc2626;
+}
+
+.btn-small {
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.select-small {
+  padding: 4px 8px;
+  font-size: 13px;
+  min-width: 80px;
 }
 
 .runner-body {
@@ -353,9 +509,9 @@ watch(() => executionStore.state?.logs.length, () => {
   flex: 2;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--el-border-color);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: var(--el-bg-color);
+  background: #fff;
 }
 
 .panel-header {
@@ -363,11 +519,13 @@ watch(() => executionStore.state?.logs.length, () => {
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .panel-header h4 {
   margin: 0;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .log-controls {
@@ -381,32 +539,58 @@ watch(() => executionStore.state?.logs.length, () => {
   padding: 8px 16px;
 }
 
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px;
+  color: #9ca3af;
+}
+
+.empty-icon {
+  color: #d1d5db;
+}
+
 .log-item {
   display: flex;
   align-items: flex-start;
   gap: 8px;
   padding: 8px 0;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  border-bottom: 1px solid #f3f4f6;
   font-size: 13px;
 }
 
 .log-item.error {
-  background: rgba(245, 108, 108, 0.05);
+  background: rgba(239, 68, 68, 0.05);
 }
 
 .log-item.warn {
-  background: rgba(230, 162, 60, 0.05);
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.log-info {
+  color: #22c55e;
+}
+
+.log-warning {
+  color: #f59e0b;
+}
+
+.log-error {
+  color: #ef4444;
 }
 
 .log-time {
-  color: var(--el-text-color-secondary);
+  color: #6b7280;
   font-size: 12px;
   min-width: 80px;
   font-family: monospace;
 }
 
 .log-node {
-  color: var(--el-color-primary);
+  color: #3b82f6;
   font-size: 11px;
   font-family: monospace;
 }
@@ -419,17 +603,17 @@ watch(() => executionStore.state?.logs.length, () => {
 .log-stats {
   padding: 8px 16px;
   font-size: 12px;
-  color: var(--el-text-color-secondary);
-  border-top: 1px solid var(--el-border-color-lighter);
+  color: #6b7280;
+  border-top: 1px solid var(--border-color);
 }
 
 .variable-panel {
   flex: 1;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--el-border-color);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: var(--el-bg-color);
+  background: #fff;
 }
 
 .variable-list {
@@ -443,19 +627,19 @@ watch(() => executionStore.state?.logs.length, () => {
   flex-direction: column;
   gap: 4px;
   padding: 8px 0;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  border-bottom: 1px solid #f3f4f6;
 }
 
 .variable-name {
   font-weight: 500;
   font-size: 13px;
-  color: var(--el-color-primary);
+  color: #3b82f6;
 }
 
 .variable-value {
   font-size: 12px;
   font-family: monospace;
-  color: var(--el-text-color-secondary);
+  color: #6b7280;
   word-break: break-all;
 }
 </style>

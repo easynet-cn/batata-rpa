@@ -1,20 +1,15 @@
 <script setup lang="ts">
 import { useRouter, useRoute } from 'vue-router';
-import {
-  Edit,
-  Collection,
-  VideoPlay,
-  Setting,
-} from '@element-plus/icons-vue';
+import { PenLine, Database, Play, Settings } from 'lucide-vue-next';
 
 const router = useRouter();
 const route = useRoute();
 
 const navItems = [
-  { path: '/designer', label: '流程设计', icon: Edit },
-  { path: '/elements', label: '元素库', icon: Collection },
-  { path: '/runner', label: '执行监控', icon: VideoPlay },
-  { path: '/settings', label: '设置', icon: Setting },
+  { path: '/designer', label: '流程设计', icon: PenLine },
+  { path: '/elements', label: '元素库', icon: Database },
+  { path: '/runner', label: '执行监控', icon: Play },
+  { path: '/settings', label: '设置', icon: Settings },
 ];
 </script>
 
@@ -25,29 +20,17 @@ const navItems = [
       <span>Batata RPA</span>
     </div>
 
-    <el-menu
-      :default-active="route.path"
-      mode="horizontal"
-      class="app-nav"
-      :ellipsis="false"
-      @select="(path: string) => router.push(path)"
-    >
-      <el-menu-item v-for="item in navItems" :key="item.path" :index="item.path">
-        <el-icon><component :is="item.icon" /></el-icon>
+    <nav class="app-nav">
+      <div
+        v-for="item in navItems"
+        :key="item.path"
+        class="nav-item"
+        :class="{ 'nav-item-active': route.path === item.path }"
+        @click="router.push(item.path)"
+      >
+        <component :is="item.icon" :size="18" />
         <span>{{ item.label }}</span>
-      </el-menu-item>
-    </el-menu>
+      </div>
+    </nav>
   </header>
 </template>
-
-<style scoped>
-.app-nav {
-  border-bottom: none !important;
-  flex: 1;
-}
-
-.app-nav .el-menu-item {
-  height: 50px;
-  line-height: 50px;
-}
-</style>

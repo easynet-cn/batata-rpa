@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import { Handle, Position } from '@vue-flow/core';
 import { NODE_CONFIGS } from '@/types';
 import { useExecutionStore } from '@/stores';
-import * as Icons from '@element-plus/icons-vue';
+import * as LucideIcons from 'lucide-vue-next';
 
 const props = defineProps<{
   id: string;
@@ -14,7 +14,7 @@ const props = defineProps<{
 
 const executionStore = useExecutionStore();
 const config = computed(() => NODE_CONFIGS[props.type as keyof typeof NODE_CONFIGS]);
-const icon = computed(() => (Icons as Record<string, unknown>)[config.value?.icon] || Icons.Document);
+const icon = computed(() => (LucideIcons as Record<string, unknown>)[config.value?.icon] || LucideIcons.FileText);
 const isExecuting = computed(() => executionStore.state?.currentNodeId === props.id);
 </script>
 
@@ -22,7 +22,7 @@ const isExecuting = computed(() => executionStore.state?.currentNodeId === props
   <div class="action-node" :class="{ executing: isExecuting }" :style="{ borderColor: config?.color }">
     <Handle type="target" :position="Position.Top" />
     <div class="node-header" :style="{ backgroundColor: config?.color }">
-      <el-icon :size="14" color="#fff"><component :is="icon" /></el-icon>
+      <component :is="icon" :size="14" class="text-white" />
       <span>{{ config?.label }}</span>
     </div>
     <div class="node-body">
@@ -64,12 +64,12 @@ const isExecuting = computed(() => executionStore.state?.currentNodeId === props
 
 .node-label {
   font-size: 13px;
-  color: var(--el-text-color-primary);
+  color: #1f2937;
 }
 
 .node-detail {
   font-size: 11px;
-  color: var(--el-text-color-secondary);
+  color: #6b7280;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -77,16 +77,16 @@ const isExecuting = computed(() => executionStore.state?.currentNodeId === props
 }
 
 .action-node.executing {
-  box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.5), 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5), 0 2px 8px rgba(0, 0, 0, 0.15);
   animation: pulse 1.5s infinite;
 }
 
 @keyframes pulse {
   0%, 100% {
-    box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.5), 0 2px 8px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5), 0 2px 8px rgba(0, 0, 0, 0.15);
   }
   50% {
-    box-shadow: 0 0 0 6px rgba(64, 158, 255, 0.3), 0 2px 8px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.3), 0 2px 8px rgba(0, 0, 0, 0.15);
   }
 }
 </style>
