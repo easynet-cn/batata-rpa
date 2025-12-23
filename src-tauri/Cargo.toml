@@ -23,3 +23,38 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# UUID generation
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Async trait
+async-trait = "0.1"
+
+# Web automation (Chrome DevTools Protocol)
+chromiumoxide = { version = "0.7", features = ["tokio-runtime"], default-features = false }
+futures = "0.3"
+
+# Excel read/write
+calamine = "0.26"
+rust_xlsxwriter = "0.79"
+
+# Platform-specific UI automation
+[target.'cfg(windows)'.dependencies]
+uiautomation = "0.19"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# macOS accessibility (to be added later)
+

@@ -1,0 +1,95 @@
+:root {
+  --header-height: 50px;
+  --sidebar-width: 200px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+.app-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app-header {
+  height: var(--header-height);
+  border-bottom: 1px solid var(--el-border-color);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  background: var(--el-bg-color);
+}
+
+.app-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.app-logo img {
+  width: 28px;
+  height: 28px;
+}
+
+.app-nav {
+  margin-left: 40px;
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.app-sidebar {
+  width: var(--sidebar-width);
+  border-right: 1px solid var(--el-border-color);
+  background: var(--el-bg-color);
+  overflow-y: auto;
+}
+
+.app-main {
+  flex: 1;
+  overflow: hidden;
+  background: var(--el-fill-color-light);
+}
+
+.page-container {
+  height: 100%;
+  padding: 16px;
+  overflow: auto;
+}
+
+/* Vue Flow customization */
+.vue-flow {
+  background: #fafafa;
+}
+
+.vue-flow__node {
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.vue-flow__edge-path {
+  stroke: #b1b1b7;
+  stroke-width: 2;
+}
+
+.vue-flow__edge.selected .vue-flow__edge-path {
+  stroke: #409eff;
+}
