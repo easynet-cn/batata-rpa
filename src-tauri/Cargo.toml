@@ -44,17 +44,52 @@ chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
 
 # Web automation (Chrome DevTools Protocol)
-chromiumoxide = { version = "0.7", features = ["tokio-runtime"], default-features = false }
+chromiumoxide = { version = "0.8", features = ["tokio-runtime"], default-features = false }
 futures = "0.3"
 
 # Excel read/write
 calamine = "0.26"
 rust_xlsxwriter = "0.79"
 
+# Database with SeaORM (supports SQLite, MySQL, PostgreSQL)
+sea-orm = { version = "1.1", features = [
+    "sqlx-sqlite",
+    "sqlx-mysql",
+    "sqlx-postgres",
+    "runtime-tokio-rustls",
+    "macros"
+] }
+
+# Configuration file support
+toml = "0.8"
+
+# App directories
+directories = "5"
+
 # Platform-specific UI automation
 [target.'cfg(windows)'.dependencies]
 uiautomation = "0.19"
+windows = { version = "0.58", features = [
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# macOS accessibility (to be added later)
+# macOS automation
+core-graphics = "0.24"
+core-foundation = "0.10"
+objc2 = "0.5"
+objc2-foundation = { version = "0.2", features = ["NSArray", "NSString", "NSDictionary", "NSValue", "NSGeometry"] }
+objc2-app-kit = { version = "0.2", features = ["NSApplication", "NSWorkspace", "NSRunningApplication", "NSEvent", "NSScreen", "NSGraphicsContext", "NSImage", "NSBitmapImageRep"] }
+cocoa = "0.26"
+dispatch = "0.2"
+block2 = "0.5"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Linux automation via AT-SPI and X11
+atspi = "0.22"
+zbus = "4"
+x11rb = { version = "0.13", features = ["xtest"] }
 

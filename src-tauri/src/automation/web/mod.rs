@@ -42,6 +42,7 @@ impl Default for BrowserOptions {
 pub struct BrowserSession {
     browser: Browser,
     page: chromiumoxide::Page,
+    user_data_dir: Option<std::path::PathBuf>,
 }
 
 pub struct WebAutomation {
@@ -60,11 +61,28 @@ impl WebAutomation {
         session_id: &str,
         options: BrowserOptions,
     ) -> AutomationResult<()> {
-        log::info!("Opening browser with session: {}", session_id);
+        log::info!("Opening browser with session: {}, headless: {}", session_id, options.headless);
 
-        let mut config_builder = BrowserConfig::builder();
+        // Create unique user data directory for this session
+        let user_data_dir = if let Some(dir) = &options.user_data_dir {
+            std::path::PathBuf::from(dir)
+        } else {
+            let temp_dir = std::env::temp_dir()
+                .join("batata-rpa-browser")
+                .join(format!("session-{}-{}", session_id, std::process::id()));
+            // Create the directory if it doesn't exist
+            std::fs::create_dir_all(&temp_dir).ok();
+            temp_dir
+        };
 
-        if options.headless {
+        log::info!("Using user data dir: {:?}", user_data_dir);
+
+        let mut config_builder = BrowserConfig::builder()
+            .user_data_dir(&user_data_dir);
+
+        // with_head() means show browser window (NOT headless)
+        // So we call with_head() when headless is FALSE
+        if !options.headless {
             config_builder = config_builder.with_head();
         }
 
@@ -72,23 +90,44 @@ impl WebAutomation {
             config_builder = config_builder.window_size(width, height);
         }
 
-        if let Some(path) = options.browser_path {
+        if let Some(path) = &options.browser_path {
             config_builder = config_builder.chrome_executable(path);
         }
+
+        // Add args for better compatibility
+        config_builder = config_builder
+            .arg("--disable-blink-features=AutomationControlled")
+            .arg("--no-first-run")
+            .arg("--no-default-browser-check")
+            .arg("--disable-background-networking")
+            .arg("--disable-client-side-phishing-detection")
+            .arg("--disable-sync");
 
         let config = config_builder
             .build()
             .map_err(|e| AutomationError::ExecutionFailed(format!("Failed to build browser config: {}", e)))?;
 
+        log::info!("Launching browser...");
+
         let (browser, mut handler) = Browser::launch(config)
             .await
             .map_err(|e| AutomationError::ExecutionFailed(format!("Failed to launch browser: {}", e)))?;
 
-        // Spawn handler task
+        // Spawn handler task to process browser events
         tokio::spawn(async move {
-            while let Some(h) = handler.next().await {
-                if h.is_err() {
-                    break;
+            loop {
+                match handler.next().await {
+                    Some(Ok(_)) => {
+                        // Event processed successfully
+                    }
+                    Some(Err(e)) => {
+                        log::warn!("Browser handler error: {}", e);
+                        // Continue processing, some errors are recoverable
+                    }
+                    None => {
+                        log::info!("Browser handler finished");
+                        break;
+                    }
                 }
             }
         });
@@ -98,7 +137,11 @@ impl WebAutomation {
             .await
             .map_err(|e| AutomationError::ExecutionFailed(format!("Failed to create page: {}", e)))?;
 
-        let session = BrowserSession { browser, page };
+        let session = BrowserSession {
+            browser,
+            page,
+            user_data_dir: Some(user_data_dir),
+        };
         self.sessions.write().await.insert(session_id.to_string(), session);
 
         log::info!("Browser opened successfully with session: {}", session_id);
@@ -119,14 +162,10 @@ impl WebAutomation {
             .await
             .map_err(|e| AutomationError::ExecutionFailed(format!("Failed to navigate: {}", e)))?;
 
-        // Wait for page to load
-        session
-            .page
-            .wait_for_navigation()
-            .await
-            .map_err(|e| AutomationError::ExecutionFailed(format!("Navigation timeout: {}", e)))?;
+        // Give page time to start loading
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-        log::info!("Navigation completed");
+        log::info!("Navigation completed to: {}", url);
         Ok(())
     }
 
@@ -219,16 +258,23 @@ impl WebAutomation {
     }
 
     pub async fn execute_js(&self, session_id: &str, script: &str) -> AutomationResult<String> {
-        log::info!("Executing JavaScript");
+        log::info!("Executing JavaScript: {}", script);
 
         let sessions = self.sessions.read().await;
         let session = sessions
             .get(session_id)
             .ok_or_else(|| AutomationError::ExecutionFailed(format!("Session not found: {}", session_id)))?;
 
+        // Wrap script in IIFE to allow return statements
+        let wrapped_script = if script.trim().starts_with("return ") {
+            format!("(function() {{ {} }})()", script)
+        } else {
+            script.to_string()
+        };
+
         let result = session
             .page
-            .evaluate(script)
+            .evaluate(wrapped_script.as_str())
             .await
             .map_err(|e| AutomationError::ExecutionFailed(format!("Failed to execute JS: {}", e)))?;
 
@@ -351,6 +397,19 @@ impl WebAutomation {
             // Close the page first
             let _ = session.page.close().await;
             // Browser will be dropped
+
+            // Clean up user data directory after a short delay
+            if let Some(user_data_dir) = session.user_data_dir {
+                tokio::spawn(async move {
+                    // Wait for browser to fully close
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    if let Err(e) = std::fs::remove_dir_all(&user_data_dir) {
+                        log::warn!("Failed to clean up user data dir {:?}: {}", user_data_dir, e);
+                    } else {
+                        log::info!("Cleaned up user data dir: {:?}", user_data_dir);
+                    }
+                });
+            }
         }
 
         log::info!("Browser session closed");
@@ -361,9 +420,24 @@ impl WebAutomation {
         log::info!("Closing all browser sessions");
 
         let mut sessions = self.sessions.write().await;
+        let mut dirs_to_clean: Vec<std::path::PathBuf> = Vec::new();
+
         for (id, session) in sessions.drain() {
             log::info!("Closing session: {}", id);
             let _ = session.page.close().await;
+            if let Some(dir) = session.user_data_dir {
+                dirs_to_clean.push(dir);
+            }
+        }
+
+        // Clean up directories in background
+        if !dirs_to_clean.is_empty() {
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                for dir in dirs_to_clean {
+                    let _ = std::fs::remove_dir_all(&dir);
+                }
+            });
         }
 
         Ok(())
@@ -501,6 +575,82 @@ impl WebAutomation {
             .await
             .map_err(|e| AutomationError::ExecutionFailed(format!("Failed to scroll to element: {}", e)))?;
 
+        Ok(())
+    }
+
+    /// Press a keyboard key in the browser
+    pub async fn press_key(&self, session_id: &str, key: &str) -> AutomationResult<()> {
+        log::info!("Pressing key: {}", key);
+
+        let sessions = self.sessions.read().await;
+        let session = sessions
+            .get(session_id)
+            .ok_or_else(|| AutomationError::ExecutionFailed(format!("Session not found: {}", session_id)))?;
+
+        // Map common key names to JavaScript key codes
+        let (js_key, key_code, code) = match key.to_lowercase().as_str() {
+            "enter" | "return" => ("Enter", 13, "Enter"),
+            "escape" | "esc" => ("Escape", 27, "Escape"),
+            "tab" => ("Tab", 9, "Tab"),
+            "backspace" => ("Backspace", 8, "Backspace"),
+            "delete" | "del" => ("Delete", 46, "Delete"),
+            "arrowup" | "up" => ("ArrowUp", 38, "ArrowUp"),
+            "arrowdown" | "down" => ("ArrowDown", 40, "ArrowDown"),
+            "arrowleft" | "left" => ("ArrowLeft", 37, "ArrowLeft"),
+            "arrowright" | "right" => ("ArrowRight", 39, "ArrowRight"),
+            "home" => ("Home", 36, "Home"),
+            "end" => ("End", 35, "End"),
+            "pageup" => ("PageUp", 33, "PageUp"),
+            "pagedown" => ("PageDown", 34, "PageDown"),
+            "space" | " " => (" ", 32, "Space"),
+            _ => (key, 0, key), // For single characters or unknown keys
+        };
+
+        // Dispatch keydown, keypress, and keyup events using JavaScript
+        let script = format!(
+            r#"
+            const activeElement = document.activeElement || document.body;
+            const keyDownEvent = new KeyboardEvent('keydown', {{
+                key: '{}',
+                code: '{}',
+                keyCode: {},
+                which: {},
+                bubbles: true,
+                cancelable: true
+            }});
+            const keyPressEvent = new KeyboardEvent('keypress', {{
+                key: '{}',
+                code: '{}',
+                keyCode: {},
+                which: {},
+                bubbles: true,
+                cancelable: true
+            }});
+            const keyUpEvent = new KeyboardEvent('keyup', {{
+                key: '{}',
+                code: '{}',
+                keyCode: {},
+                which: {},
+                bubbles: true,
+                cancelable: true
+            }});
+            activeElement.dispatchEvent(keyDownEvent);
+            activeElement.dispatchEvent(keyPressEvent);
+            activeElement.dispatchEvent(keyUpEvent);
+            true
+            "#,
+            js_key, code, key_code, key_code,
+            js_key, code, key_code, key_code,
+            js_key, code, key_code, key_code
+        );
+
+        session
+            .page
+            .evaluate(script)
+            .await
+            .map_err(|e| AutomationError::ExecutionFailed(format!("Failed to press key: {}", e)))?;
+
+        log::info!("Key press completed: {}", key);
         Ok(())
     }
 

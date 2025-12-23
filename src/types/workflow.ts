@@ -66,7 +66,10 @@ export type NodeType =
   | 'closeBrowser'
   | 'executeJs'
   | 'readExcel'
-  | 'writeExcel';
+  | 'writeExcel'
+  | 'executeCommand'
+  | 'listDirectory'
+  | 'openApp';
 
 export interface NodeConfig {
   type: NodeType;
@@ -265,5 +268,26 @@ export const NODE_CONFIGS: Record<NodeType, NodeConfig> = {
     icon: 'Document',
     category: 'data',
     color: '#67c23a',
+  },
+  executeCommand: {
+    type: 'executeCommand',
+    label: '执行命令',
+    icon: 'Promotion',
+    category: 'action',
+    color: '#909399',
+  },
+  listDirectory: {
+    type: 'listDirectory',
+    label: '列出目录',
+    icon: 'Files',
+    category: 'data',
+    color: '#67c23a',
+  },
+  openApp: {
+    type: 'openApp',
+    label: '打开应用',
+    icon: 'Open',
+    category: 'action',
+    color: '#409eff',
   },
 };

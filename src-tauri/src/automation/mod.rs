@@ -1,5 +1,6 @@
 pub mod desktop;
 pub mod file;
+pub mod highlight;
 pub mod web;
 
 use serde::{Deserialize, Serialize};

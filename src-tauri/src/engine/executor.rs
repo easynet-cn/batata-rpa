@@ -235,6 +235,9 @@ impl Executor {
             "executeJs" => self.execute_js(node).await,
             "readExcel" => self.execute_read_excel(node).await,
             "writeExcel" => self.execute_write_excel(node).await,
+            "executeCommand" => self.execute_command(node).await,
+            "listDirectory" => self.execute_list_directory(node).await,
+            "openApp" => self.execute_open_app(node).await,
             // Special nodes handled in execute_from_node
             "condition" | "loop" | "forEach" | "tryCatch" => Ok(()),
             _ => {
@@ -961,8 +964,29 @@ impl Executor {
             )
             .await;
 
-        // TODO: Implement actual keyboard simulation
-        // self.automation.send_keys(&key_combo)?;
+        // Try to use browser keyboard if there's an active browser session
+        let browser_session_id = self
+            .runtime
+            .get_variable("_browser_session_id")
+            .await
+            .and_then(|v| {
+                if let VariableValue::String(s) = v {
+                    Some(s)
+                } else {
+                    None
+                }
+            });
+
+        if let Some(session_id) = browser_session_id {
+            // Use browser's keyboard input
+            self.web_automation
+                .press_key(&session_id, &key_combo)
+                .await
+                .map_err(|e| EngineError::ExecutionFailed(format!("Failed to press key: {}", e)))?;
+        } else {
+            // TODO: Implement desktop keyboard simulation
+            log::warn!("Desktop keyboard simulation not yet implemented");
+        }
 
         Ok(())
     }
@@ -1056,6 +1080,11 @@ impl Executor {
         // Store session ID in variable for later use
         self.runtime
             .set_variable(browser_variable, VariableValue::String(session_id.clone()))
+            .await;
+
+        // Also store in a special internal variable for hotkey/other nodes to find
+        self.runtime
+            .set_variable("_browser_session_id", VariableValue::String(session_id.clone()))
             .await;
 
         // Navigate to initial URL if provided
@@ -1509,59 +1538,102 @@ impl Executor {
             .and_then(|v| v.as_str())
             .unwrap_or("Sheet1");
 
-        let data_variable = node
-            .data
-            .get("dataVariable")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
         let interpolated_path = self.runtime.interpolate(file_path).await;
+
+        // Expand ~ to home directory
+        let expanded_path = if interpolated_path.starts_with('~') {
+            if let Some(base_dirs) = directories::BaseDirs::new() {
+                interpolated_path.replacen('~', base_dirs.home_dir().to_str().unwrap_or(""), 1)
+            } else {
+                interpolated_path.clone()
+            }
+        } else {
+            interpolated_path.clone()
+        };
 
         self.runtime
             .add_log(
-                ExecutionLog::info(format!("Writing Excel file: {}", interpolated_path))
+                ExecutionLog::info(format!("Writing Excel file: {}", expanded_path))
                     .with_node(&node.id),
             )
             .await;
 
-        // Get data from variable
-        let data_json = self
-            .runtime
-            .get_variable(data_variable)
-            .await
-            .and_then(|v| {
-                if let VariableValue::String(s) = v {
-                    Some(s)
-                } else {
-                    None
+        // Get data - either from inline "data" field or from "dataVariable" reference
+        let rows: Vec<Vec<String>> = if let Some(inline_data) = node.data.get("data") {
+            // Inline data array in node config
+            if let Some(arr) = inline_data.as_array() {
+                let mut result = Vec::new();
+                for row in arr {
+                    if let Some(row_arr) = row.as_array() {
+                        let mut row_result = Vec::new();
+                        for cell in row_arr {
+                            let cell_str = cell.as_str().unwrap_or("");
+                            // Interpolate variables in each cell
+                            let interpolated = self.runtime.interpolate(cell_str).await;
+                            row_result.push(interpolated);
+                        }
+                        result.push(row_result);
+                    }
                 }
-            })
-            .ok_or_else(|| {
-                EngineError::ExecutionFailed(format!(
-                    "Variable '{}' not found or not a string",
-                    data_variable
-                ))
-            })?;
+                result
+            } else {
+                return Err(EngineError::ExecutionFailed(
+                    "Inline 'data' field must be a 2D array".to_string(),
+                ));
+            }
+        } else if let Some(data_variable) = node.data.get("dataVariable").and_then(|v| v.as_str()) {
+            // Data from variable reference
+            if data_variable.is_empty() {
+                return Err(EngineError::ExecutionFailed(
+                    "Either 'data' or 'dataVariable' must be provided".to_string(),
+                ));
+            }
 
-        // Try to parse as ExcelData first, then as simple 2D array
-        let rows: Vec<Vec<String>> = if let Ok(excel_data) =
-            serde_json::from_str::<crate::automation::file::ExcelData>(&data_json)
-        {
-            excel_data
-                .sheets
-                .first()
-                .map(|s| s.rows.clone())
-                .unwrap_or_default()
-        } else if let Ok(parsed_rows) = serde_json::from_str::<Vec<Vec<String>>>(&data_json) {
-            parsed_rows
+            let data_json = self
+                .runtime
+                .get_variable(data_variable)
+                .await
+                .and_then(|v| {
+                    if let VariableValue::String(s) = v {
+                        Some(s)
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(|| {
+                    EngineError::ExecutionFailed(format!(
+                        "Variable '{}' not found or not a string",
+                        data_variable
+                    ))
+                })?;
+
+            // Try to parse as ExcelData first, then as simple 2D array, then as array of objects
+            if let Ok(excel_data) =
+                serde_json::from_str::<crate::automation::file::ExcelData>(&data_json)
+            {
+                excel_data
+                    .sheets
+                    .first()
+                    .map(|s| s.rows.clone())
+                    .unwrap_or_default()
+            } else if let Ok(parsed_rows) = serde_json::from_str::<Vec<Vec<String>>>(&data_json) {
+                parsed_rows
+            } else if let Ok(objects) = serde_json::from_str::<Vec<serde_json::Value>>(&data_json) {
+                // Convert array of objects to 2D array (with header row)
+                self.convert_objects_to_rows(&objects, node)?
+            } else {
+                return Err(EngineError::ExecutionFailed(
+                    "Data variable must be valid JSON (ExcelData, 2D array, or array of objects)".to_string(),
+                ));
+            }
         } else {
             return Err(EngineError::ExecutionFailed(
-                "Data variable must be valid JSON (ExcelData or 2D array)".to_string(),
+                "Either 'data' or 'dataVariable' must be provided".to_string(),
             ));
         };
 
         self.file_automation
-            .write_excel_sheet(&interpolated_path, sheet_name, &rows)
+            .write_excel_sheet(&expanded_path, sheet_name, &rows)
             .map_err(|e| EngineError::ExecutionFailed(e.to_string()))?;
 
         self.runtime
@@ -1593,6 +1665,427 @@ impl Executor {
 
         // Excel rows are 1-indexed, convert to 0-indexed
         (col, if row > 0 { row - 1 } else { 0 })
+    }
+
+    /// Execute a shell command and optionally save output to a variable
+    async fn execute_command(&self, node: &WorkflowNode) -> EngineResult<()> {
+        let command = node
+            .data
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let args: Vec<String> = node
+            .data
+            .get("args")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let output_variable = node
+            .data
+            .get("outputVariable")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let working_dir = node
+            .data
+            .get("workingDir")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let interpolated_command = self.runtime.interpolate(command).await;
+        let interpolated_working_dir = if working_dir.is_empty() {
+            None
+        } else {
+            Some(self.runtime.interpolate(working_dir).await)
+        };
+
+        self.runtime
+            .add_log(
+                ExecutionLog::info(format!("Executing command: {} {:?}", interpolated_command, args))
+                    .with_node(&node.id),
+            )
+            .await;
+
+        // Build command
+        let mut cmd = std::process::Command::new(&interpolated_command);
+        cmd.args(&args);
+
+        if let Some(dir) = &interpolated_working_dir {
+            cmd.current_dir(dir);
+        }
+
+        // Execute command
+        let output = cmd
+            .output()
+            .map_err(|e| EngineError::ExecutionFailed(format!("Failed to execute command: {}", e)))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        if !output.status.success() {
+            self.runtime
+                .add_log(
+                    ExecutionLog::warn(format!("Command exited with error: {}", stderr))
+                        .with_node(&node.id),
+                )
+                .await;
+        }
+
+        // Save output to variable if specified
+        if !output_variable.is_empty() {
+            self.runtime
+                .set_variable(output_variable, VariableValue::String(stdout.clone()))
+                .await;
+            self.runtime
+                .add_log(
+                    ExecutionLog::info(format!("Command output saved to '{}'", output_variable))
+                        .with_node(&node.id),
+                )
+                .await;
+        }
+
+        self.runtime
+            .add_log(
+                ExecutionLog::info(format!("Command completed with status: {}", output.status))
+                    .with_node(&node.id),
+            )
+            .await;
+
+        Ok(())
+    }
+
+    /// List files and directories in a given path
+    async fn execute_list_directory(&self, node: &WorkflowNode) -> EngineResult<()> {
+        let path = node
+            .data
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or(".");
+
+        let output_variable = node
+            .data
+            .get("outputVariable")
+            .and_then(|v| v.as_str())
+            .unwrap_or("files");
+
+        let include_hidden = node
+            .data
+            .get("includeHidden")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let recursive = node
+            .data
+            .get("recursive")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let interpolated_path = self.runtime.interpolate(path).await;
+
+        // Expand ~ to home directory
+        let expanded_path = if interpolated_path.starts_with('~') {
+            if let Some(base_dirs) = directories::BaseDirs::new() {
+                interpolated_path.replacen('~', base_dirs.home_dir().to_str().unwrap_or(""), 1)
+            } else {
+                interpolated_path.clone()
+            }
+        } else {
+            interpolated_path.clone()
+        };
+
+        self.runtime
+            .add_log(
+                ExecutionLog::info(format!("Listing directory: {}", expanded_path))
+                    .with_node(&node.id),
+            )
+            .await;
+
+        let path_buf = std::path::PathBuf::from(&expanded_path);
+        if !path_buf.exists() {
+            return Err(EngineError::ExecutionFailed(format!(
+                "Directory does not exist: {}",
+                expanded_path
+            )));
+        }
+
+        let mut entries: Vec<serde_json::Value> = Vec::new();
+
+        if recursive {
+            self.list_directory_recursive(&path_buf, include_hidden, &mut entries)?;
+        } else {
+            let dir_entries = std::fs::read_dir(&path_buf)
+                .map_err(|e| EngineError::ExecutionFailed(format!("Failed to read directory: {}", e)))?;
+
+            for entry in dir_entries.flatten() {
+                let file_name = entry.file_name().to_string_lossy().to_string();
+
+                // Skip hidden files if not included
+                if !include_hidden && file_name.starts_with('.') {
+                    continue;
+                }
+
+                let metadata = entry.metadata().ok();
+                let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+                let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+
+                entries.push(serde_json::json!({
+                    "name": file_name,
+                    "path": entry.path().to_string_lossy().to_string(),
+                    "isDirectory": is_dir,
+                    "size": size
+                }));
+            }
+        }
+
+        // Sort entries: directories first, then by name
+        entries.sort_by(|a, b| {
+            let a_is_dir = a.get("isDirectory").and_then(|v| v.as_bool()).unwrap_or(false);
+            let b_is_dir = b.get("isDirectory").and_then(|v| v.as_bool()).unwrap_or(false);
+            if a_is_dir != b_is_dir {
+                return b_is_dir.cmp(&a_is_dir); // Directories first
+            }
+            let a_name = a.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let b_name = b.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            a_name.cmp(b_name)
+        });
+
+        // Save to variable as JSON string
+        let json_str = serde_json::to_string(&entries)
+            .map_err(|e| EngineError::ExecutionFailed(format!("Failed to serialize entries: {}", e)))?;
+
+        self.runtime
+            .set_variable(output_variable, VariableValue::String(json_str))
+            .await;
+
+        self.runtime
+            .add_log(
+                ExecutionLog::info(format!(
+                    "Found {} entries, saved to '{}'",
+                    entries.len(),
+                    output_variable
+                ))
+                .with_node(&node.id),
+            )
+            .await;
+
+        Ok(())
+    }
+
+    fn list_directory_recursive(
+        &self,
+        path: &std::path::Path,
+        include_hidden: bool,
+        entries: &mut Vec<serde_json::Value>,
+    ) -> EngineResult<()> {
+        let dir_entries = std::fs::read_dir(path)
+            .map_err(|e| EngineError::ExecutionFailed(format!("Failed to read directory: {}", e)))?;
+
+        for entry in dir_entries.flatten() {
+            let file_name = entry.file_name().to_string_lossy().to_string();
+
+            // Skip hidden files if not included
+            if !include_hidden && file_name.starts_with('.') {
+                continue;
+            }
+
+            let metadata = entry.metadata().ok();
+            let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+            let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+
+            entries.push(serde_json::json!({
+                "name": file_name,
+                "path": entry.path().to_string_lossy().to_string(),
+                "isDirectory": is_dir,
+                "size": size
+            }));
+
+            // Recurse into directories
+            if is_dir {
+                let _ = self.list_directory_recursive(&entry.path(), include_hidden, entries);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Convert JSON array of objects to 2D array for Excel
+    fn convert_objects_to_rows(
+        &self,
+        objects: &[serde_json::Value],
+        node: &WorkflowNode,
+    ) -> EngineResult<Vec<Vec<String>>> {
+        if objects.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Get column names from node config or auto-detect from first object
+        let columns: Vec<String> = if let Some(cols) = node.data.get("columns").and_then(|v| v.as_array()) {
+            cols.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        } else {
+            // Auto-detect columns from first object
+            if let Some(first_obj) = objects.first().and_then(|v| v.as_object()) {
+                first_obj.keys().cloned().collect()
+            } else {
+                return Err(EngineError::ExecutionFailed(
+                    "Cannot determine columns from data".to_string(),
+                ));
+            }
+        };
+
+        let mut rows: Vec<Vec<String>> = Vec::new();
+
+        // Add header row
+        let include_header = node
+            .data
+            .get("includeHeader")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        if include_header {
+            rows.push(columns.clone());
+        }
+
+        // Add data rows
+        for obj in objects {
+            if let Some(obj_map) = obj.as_object() {
+                let row: Vec<String> = columns
+                    .iter()
+                    .map(|col| {
+                        obj_map
+                            .get(col)
+                            .map(|v| match v {
+                                serde_json::Value::String(s) => s.clone(),
+                                serde_json::Value::Bool(b) => b.to_string(),
+                                serde_json::Value::Number(n) => n.to_string(),
+                                serde_json::Value::Null => String::new(),
+                                _ => v.to_string(),
+                            })
+                            .unwrap_or_default()
+                    })
+                    .collect();
+                rows.push(row);
+            }
+        }
+
+        Ok(rows)
+    }
+
+    /// Open an application
+    async fn execute_open_app(&self, node: &WorkflowNode) -> EngineResult<()> {
+        let app_name = node
+            .data
+            .get("appName")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let app_path = node
+            .data
+            .get("appPath")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let arguments: Vec<String> = node
+            .data
+            .get("arguments")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let interpolated_app_name = self.runtime.interpolate(app_name).await;
+        let interpolated_app_path = self.runtime.interpolate(app_path).await;
+
+        self.runtime
+            .add_log(
+                ExecutionLog::info(format!(
+                    "Opening application: {}",
+                    if !interpolated_app_name.is_empty() {
+                        &interpolated_app_name
+                    } else {
+                        &interpolated_app_path
+                    }
+                ))
+                .with_node(&node.id),
+            )
+            .await;
+
+        #[cfg(target_os = "macos")]
+        {
+            let mut cmd = std::process::Command::new("open");
+
+            if !interpolated_app_name.is_empty() {
+                cmd.args(["-a", &interpolated_app_name]);
+            } else if !interpolated_app_path.is_empty() {
+                cmd.arg(&interpolated_app_path);
+            } else {
+                return Err(EngineError::ExecutionFailed(
+                    "Either appName or appPath must be provided".to_string(),
+                ));
+            }
+
+            // Add any additional arguments
+            if !arguments.is_empty() {
+                cmd.arg("--args");
+                cmd.args(&arguments);
+            }
+
+            cmd.spawn()
+                .map_err(|e| EngineError::ExecutionFailed(format!("Failed to open application: {}", e)))?;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let target = if !interpolated_app_path.is_empty() {
+                &interpolated_app_path
+            } else {
+                &interpolated_app_name
+            };
+
+            let mut cmd = std::process::Command::new("cmd");
+            cmd.args(["/C", "start", "", target]);
+            cmd.args(&arguments);
+
+            cmd.spawn()
+                .map_err(|e| EngineError::ExecutionFailed(format!("Failed to open application: {}", e)))?;
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let target = if !interpolated_app_path.is_empty() {
+                &interpolated_app_path
+            } else {
+                &interpolated_app_name
+            };
+
+            let mut cmd = std::process::Command::new("xdg-open");
+            cmd.arg(target);
+            cmd.args(&arguments);
+
+            cmd.spawn()
+                .map_err(|e| EngineError::ExecutionFailed(format!("Failed to open application: {}", e)))?;
+        }
+
+        // Give the app time to start
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        self.runtime
+            .add_log(
+                ExecutionLog::info("Application opened successfully").with_node(&node.id),
+            )
+            .await;
+
+        Ok(())
     }
 
     pub async fn get_state(&self) -> super::runtime::RuntimeState {

@@ -7,8 +7,25 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const currentWorkflow = ref<Workflow | null>(null);
   const selectedNodeId = ref<string | null>(null);
 
-  const currentNodes = computed(() => currentWorkflow.value?.nodes ?? []);
-  const currentEdges = computed(() => currentWorkflow.value?.edges ?? []);
+  const currentNodes = computed({
+    get: () => currentWorkflow.value?.nodes ?? [],
+    set: (nodes) => {
+      if (currentWorkflow.value) {
+        currentWorkflow.value.nodes = nodes;
+        currentWorkflow.value.updatedAt = new Date().toISOString();
+      }
+    },
+  });
+
+  const currentEdges = computed({
+    get: () => currentWorkflow.value?.edges ?? [],
+    set: (edges) => {
+      if (currentWorkflow.value) {
+        currentWorkflow.value.edges = edges;
+        currentWorkflow.value.updatedAt = new Date().toISOString();
+      }
+    },
+  });
   const selectedNode = computed(() =>
     currentNodes.value.find((n) => n.id === selectedNodeId.value)
   );
@@ -46,7 +63,8 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   function addNode(node: WorkflowNode) {
     if (currentWorkflow.value) {
-      currentWorkflow.value.nodes.push(node);
+      // 使用新数组确保 Vue 响应式更新
+      currentWorkflow.value.nodes = [...currentWorkflow.value.nodes, node];
       currentWorkflow.value.updatedAt = new Date().toISOString();
     }
   }

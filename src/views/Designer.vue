@@ -1,18 +1,21 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue';
+import { onMounted, ref, computed, watch } from 'vue';
 import { VueFlow, useVueFlow } from '@vue-flow/core';
+import type { Node, Edge } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
 import { MiniMap } from '@vue-flow/minimap';
-import { VideoPlay, Download, CaretRight, VideoPause, SwitchFilled, Aim, ArrowDown } from '@element-plus/icons-vue';
+import { VideoPlay, Download, CaretRight, VideoPause, SwitchFilled, Aim, ArrowDown, VideoCamera, FolderOpened, Document } from '@element-plus/icons-vue';
 import { invoke } from '@tauri-apps/api/core';
 import { ElMessage } from 'element-plus';
 import { useWorkflowStore, useExecutionStore, type DebugMode } from '@/stores';
+import { useRecorderStore } from '@/stores/recorder';
 import { NODE_CONFIGS, type NodeType } from '@/types';
 import NodePalette from '@/components/designer/NodePalette.vue';
 import PropertyPanel from '@/components/designer/PropertyPanel.vue';
 import VariablePanel from '@/components/designer/VariablePanel.vue';
 import DebugPanel from '@/components/designer/DebugPanel.vue';
+import RecorderPanel from '@/components/designer/RecorderPanel.vue';
 import StartNode from '@/components/designer/nodes/StartNode.vue';
 import EndNode from '@/components/designer/nodes/EndNode.vue';
 import ActionNode from '@/components/designer/nodes/ActionNode.vue';
@@ -22,14 +25,100 @@ import TryCatchNode from '@/components/designer/nodes/TryCatchNode.vue';
 
 const workflowStore = useWorkflowStore();
 const executionStore = useExecutionStore();
+const recorderStore = useRecorderStore();
 
-const { onConnect, addEdges, onNodeClick, project } = useVueFlow();
+// 本地节点和边数组，用于 Vue Flow
+const nodes = ref<Node[]>([]);
+const edges = ref<Edge[]>([]);
 
+// 防止 watch 循环的标志
+let isUpdatingFromStore = false;
+let isUpdatingFromLocal = false;
+
+const { onConnect, addEdges, onNodeClick, screenToFlowCoordinate } = useVueFlow();
+
+// 初始化时同步 store 数据到本地
 onMounted(() => {
   if (!workflowStore.currentWorkflow) {
     workflowStore.createWorkflow('新建流程');
   }
+  // 同步初始节点
+  syncFromStore();
 });
+
+// 从 store 同步到本地
+function syncFromStore() {
+  if (workflowStore.currentWorkflow) {
+    isUpdatingFromStore = true;
+    nodes.value = workflowStore.currentWorkflow.nodes.map(n => ({
+      id: n.id,
+      type: n.type,
+      position: n.position,
+      data: n.data,
+      label: n.label,
+    }));
+    edges.value = workflowStore.currentWorkflow.edges.map(e => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      sourceHandle: e.sourceHandle,
+      targetHandle: e.targetHandle,
+    }));
+    setTimeout(() => { isUpdatingFromStore = false; }, 0);
+  }
+}
+
+// 监听 store 变化，同步到本地
+watch(() => workflowStore.currentWorkflow?.nodes.length, () => {
+  if (isUpdatingFromLocal) return;
+  syncFromStore();
+});
+
+watch(() => workflowStore.currentWorkflow?.edges.length, () => {
+  if (isUpdatingFromLocal) return;
+  if (workflowStore.currentWorkflow) {
+    isUpdatingFromStore = true;
+    edges.value = workflowStore.currentWorkflow.edges.map(e => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      sourceHandle: e.sourceHandle,
+      targetHandle: e.targetHandle,
+    }));
+    setTimeout(() => { isUpdatingFromStore = false; }, 0);
+  }
+});
+
+// 监听本地节点变化，同步到 store（仅位置变化等）
+watch(nodes, (newNodes) => {
+  if (isUpdatingFromStore) return;
+  if (workflowStore.currentWorkflow) {
+    isUpdatingFromLocal = true;
+    workflowStore.currentWorkflow.nodes = newNodes.map(n => ({
+      id: n.id,
+      type: n.type || 'default',
+      position: n.position,
+      data: n.data || {},
+      label: typeof n.label === 'string' ? n.label : undefined,
+    }));
+    setTimeout(() => { isUpdatingFromLocal = false; }, 0);
+  }
+}, { deep: true });
+
+watch(edges, (newEdges) => {
+  if (isUpdatingFromStore) return;
+  if (workflowStore.currentWorkflow) {
+    isUpdatingFromLocal = true;
+    workflowStore.currentWorkflow.edges = newEdges.map(e => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      sourceHandle: e.sourceHandle ?? undefined,
+      targetHandle: e.targetHandle ?? undefined,
+    }));
+    setTimeout(() => { isUpdatingFromLocal = false; }, 0);
+  }
+}, { deep: true });
 
 onConnect((params) => {
   addEdges([params]);
@@ -47,19 +136,25 @@ onNodeClick(({ node }) => {
 });
 
 function onDrop(event: DragEvent) {
+  event.preventDefault();
+
   const type = event.dataTransfer?.getData('application/rpa-node') as NodeType;
-  if (!type) return;
+  if (!type) {
+    return;
+  }
 
   const config = NODE_CONFIGS[type];
-  const { left, top } = (event.target as HTMLElement)
-    .closest('.vue-flow')!
-    .getBoundingClientRect();
-  const position = project({
-    x: event.clientX - left,
-    y: event.clientY - top,
+  if (!config) {
+    return;
+  }
+
+  // Use screenToFlowCoordinate for proper coordinate transformation
+  const position = screenToFlowCoordinate({
+    x: event.clientX,
+    y: event.clientY,
   });
 
-  const newNode = {
+  const newNode: Node = {
     id: `${type}-${Date.now()}`,
     type,
     position,
@@ -67,7 +162,8 @@ function onDrop(event: DragEvent) {
     label: config.label,
   };
 
-  workflowStore.addNode(newNode);
+  // 直接添加到本地 nodes 数组
+  nodes.value = [...nodes.value, newNode];
 }
 
 function onDragOver(event: DragEvent) {
@@ -97,7 +193,7 @@ async function runWorkflow() {
       name: workflowStore.currentWorkflow.name,
       nodes: workflowStore.currentWorkflow.nodes.map(n => ({
         id: n.id,
-        node_type: n.type,
+        type: n.type,
         position: n.position,
         data: n.data,
         label: n.label,
@@ -178,6 +274,28 @@ function saveWorkflow() {
   URL.revokeObjectURL(url);
 }
 
+// 示例流程列表
+const exampleWorkflows = [
+  { name: 'Google搜索写入Excel', file: 'google-search-to-excel.json' },
+  { name: '列出用户目录写入Excel', file: 'list-home-directory-to-excel.json' },
+];
+
+// 加载示例流程
+async function loadExample(filename: string) {
+  try {
+    const response = await fetch(`/examples/${filename}`);
+    if (!response.ok) {
+      throw new Error('加载失败');
+    }
+    const json = await response.text();
+    workflowStore.loadFromJson(json);
+    syncFromStore();
+    ElMessage.success('示例流程加载成功');
+  } catch (error) {
+    ElMessage.error(`加载示例失败: ${error}`);
+  }
+}
+
 // Debug functions
 async function runDebugWorkflow(mode: DebugMode) {
   if (!workflowStore.currentWorkflow) return;
@@ -192,7 +310,7 @@ async function runDebugWorkflow(mode: DebugMode) {
       name: workflowStore.currentWorkflow.name,
       nodes: workflowStore.currentWorkflow.nodes.map(n => ({
         id: n.id,
-        node_type: n.type,
+        type: n.type,
         position: n.position,
         data: n.data,
         label: n.label,
@@ -350,18 +468,41 @@ async function pollDebugExecutionState(workflowId: string) {
         <el-icon><Download /></el-icon>
         保存
       </el-button>
+
+      <el-dropdown @command="loadExample" :disabled="isRunning">
+        <el-button :disabled="isRunning">
+          <el-icon><FolderOpened /></el-icon>
+          示例
+          <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item
+              v-for="example in exampleWorkflows"
+              :key="example.file"
+              :command="example.file"
+            >
+              <el-icon><Document /></el-icon>
+              {{ example.name }}
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+
       <span class="workflow-name">{{ workflowStore.currentWorkflow?.name }}</span>
     </div>
 
     <div class="designer-body">
       <NodePalette class="designer-palette" />
 
-      <div class="designer-canvas" @drop="onDrop" @dragover="onDragOver">
+      <div class="designer-canvas">
         <VueFlow
-          v-model:nodes="workflowStore.currentNodes"
-          v-model:edges="workflowStore.currentEdges"
+          v-model:nodes="nodes"
+          v-model:edges="edges"
           fit-view-on-init
           :default-viewport="{ zoom: 1 }"
+          @drop="onDrop"
+          @dragover="onDragOver"
         >
           <template #node-start="nodeProps">
             <StartNode :id="nodeProps.id" :data="nodeProps.data" :label="String(nodeProps.label || '')" />
@@ -462,6 +603,15 @@ async function pollDebugExecutionState(workflowId: string) {
           <el-tab-pane label="调试" name="debug">
             <DebugPanel />
           </el-tab-pane>
+          <el-tab-pane name="recorder">
+            <template #label>
+              <span class="recorder-tab-label">
+                <el-icon v-if="!recorderStore.isIdle" class="recording-indicator"><VideoCamera /></el-icon>
+                录制
+              </span>
+            </template>
+            <RecorderPanel />
+          </el-tab-pane>
         </el-tabs>
       </div>
     </div>
@@ -536,6 +686,26 @@ async function pollDebugExecutionState(workflowId: string) {
 
 .debug-tag {
   margin-left: 8px;
+}
+
+.recorder-tab-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.recording-indicator {
+  color: var(--el-color-danger);
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 </style>
 

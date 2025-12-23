@@ -107,7 +107,7 @@ async function startExecution() {
       name: workflowStore.currentWorkflow.name,
       nodes: workflowStore.currentWorkflow.nodes.map(n => ({
         id: n.id,
-        node_type: n.type,
+        type: n.type,
         position: n.position,
         data: n.data,
         label: n.label,

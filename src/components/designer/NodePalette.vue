@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { NODE_CONFIGS, type NodeType } from '@/types';
+import { useWorkflowStore } from '@/stores';
 import * as Icons from '@element-plus/icons-vue';
+
+const workflowStore = useWorkflowStore();
 
 const categories = [
   { key: 'control', label: '流程控制' },
@@ -18,6 +21,29 @@ function onDragStart(event: DragEvent, type: NodeType) {
     event.dataTransfer.setData('application/rpa-node', type);
     event.dataTransfer.effectAllowed = 'move';
   }
+}
+
+// 点击添加节点到画布
+function onNodeClick(type: NodeType) {
+  const config = NODE_CONFIGS[type];
+  if (!config || !workflowStore.currentWorkflow) {
+    return;
+  }
+
+  // 计算新节点位置：基于现有节点数量错开位置
+  const existingNodes = workflowStore.currentNodes;
+  const offsetX = (existingNodes.length % 5) * 50;
+  const offsetY = Math.floor(existingNodes.length / 5) * 80;
+
+  const newNode = {
+    id: `${type}-${Date.now()}`,
+    type,
+    position: { x: 300 + offsetX, y: 150 + offsetY },
+    data: {},
+    label: config.label,
+  };
+
+  workflowStore.addNode(newNode);
 }
 
 function getIcon(iconName: string) {
@@ -45,6 +71,8 @@ function getIcon(iconName: string) {
             class="node-item"
             draggable="true"
             @dragstart="onDragStart($event, node.type)"
+            @click="onNodeClick(node.type)"
+            title="点击添加到画布，或拖拽到指定位置"
           >
             <div class="node-icon" :style="{ backgroundColor: node.color }">
               <el-icon :size="16" color="#fff">
